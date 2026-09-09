@@ -1,7 +1,7 @@
 <?php
 /**
  * Admin: menu, scoped enqueue, settings save handlers (PRG, nonce + cap), and the tabbed
- * dashboard rendered 1:1 on the shared `.dd-app` design system. Tabs: Dashboard (score + status
+ * dashboard rendered 1:1 on the shared `.dd-app` design system. Tabs: Overview (score + status
  * cards + main buttons + storage trend), Review (visual grid powered by mc-admin.js + REST),
  * Recycle Bin (batches + restore/delete), Settings.
  */
@@ -222,6 +222,7 @@ function devdsame_inline_js()
         var tabs = app.querySelectorAll('.dd-tab[data-dd-tab]');
         var panels = app.querySelectorAll('.dd-tabpanel[data-dd-panel]');
         function show(name) {
+            if (name === 'dashboard') { name = 'overview'; } // legacy hash from 1.0.8 and earlier
             var found = false;
             panels.forEach(function (p) {
                 var on = p.getAttribute('data-dd-panel') === name;
@@ -370,7 +371,7 @@ function devdsame_handle_clear_error()
     if (function_exists('devdsame_clear_last_error')) {
         devdsame_clear_last_error();
     }
-    wp_safe_redirect(add_query_arg(array('page' => DEVDSAME_PAGE, 'mc_tab' => 'dashboard'), admin_url('admin.php')));
+    wp_safe_redirect(add_query_arg(array('page' => DEVDSAME_PAGE, 'mc_tab' => 'overview'), admin_url('admin.php')));
     exit;
 }
 add_action('admin_init', 'devdsame_handle_clear_error');
@@ -417,9 +418,12 @@ function devdsame_backup_active()
 
 function devdsame_render_page()
 {
-    $tab = isset($_GET['mc_tab']) ? sanitize_key(wp_unslash($_GET['mc_tab'])) : 'dashboard'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only tab selector, allowlisted below.
-    if (!in_array($tab, array('dashboard', 'review', 'trash', 'backup', 'settings'), true)) {
-        $tab = 'dashboard';
+    $tab = isset($_GET['mc_tab']) ? sanitize_key(wp_unslash($_GET['mc_tab'])) : 'overview'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only tab selector, allowlisted below.
+    if ($tab === 'dashboard') {
+        $tab = 'overview'; // legacy slug from 1.0.8 and earlier
+    }
+    if (!in_array($tab, array('overview', 'review', 'trash', 'backup', 'settings'), true)) {
+        $tab = 'overview';
     }
     $base = admin_url('admin.php?page=' . DEVDSAME_PAGE);
     $s = devdsame_hub_summary();
@@ -437,7 +441,7 @@ function devdsame_render_page()
                 </div>
             </div>
             <div class="dd-tabs max-w-5xl" style="margin:0;border-bottom:0;" role="tablist">
-                <a class="dd-tab <?php echo $tab === 'dashboard' ? 'is-active' : ''; ?>" href="#dashboard" role="tab" data-dd-tab="dashboard"><span class="dashicons dashicons-dashboard"></span> <?php esc_html_e('Dashboard', 'devdome-safe-media-cleaner'); ?></a>
+                <a class="dd-tab <?php echo $tab === 'overview' ? 'is-active' : ''; ?>" href="#overview" role="tab" data-dd-tab="overview"><span class="dashicons dashicons-dashboard"></span> <?php esc_html_e('Overview', 'devdome-safe-media-cleaner'); ?></a>
                 <a class="dd-tab <?php echo $tab === 'review' ? 'is-active' : ''; ?>" href="#review" role="tab" data-dd-tab="review"><span class="dashicons dashicons-images-alt2"></span> <?php esc_html_e('Review', 'devdome-safe-media-cleaner'); ?></a>
                 <a class="dd-tab <?php echo $tab === 'trash' ? 'is-active' : ''; ?>" href="#trash" role="tab" data-dd-tab="trash"><span class="dashicons dashicons-trash"></span> <?php esc_html_e('Recycle Bin', 'devdome-safe-media-cleaner'); ?></a>
                 <a class="dd-tab <?php echo $tab === 'backup' ? 'is-active' : ''; ?>" href="#backup" role="tab" data-dd-tab="backup"><span class="dashicons dashicons-backup"></span> <?php esc_html_e('Backup & Restore', 'devdome-safe-media-cleaner'); ?></a>
@@ -447,7 +451,7 @@ function devdsame_render_page()
         <main>
             <?php // All panels render once; switching is instant client-side (no page reload). The
             // $tab from ?mc_tab= still picks the initial active panel so form-save PRG redirects land right. ?>
-            <div class="dd-tabpanel<?php echo $tab === 'dashboard' ? ' is-active' : ''; ?>" data-dd-panel="dashboard" role="tabpanel"><?php devdsame_render_dashboard_tab($s); ?></div>
+            <div class="dd-tabpanel<?php echo $tab === 'overview' ? ' is-active' : ''; ?>" data-dd-panel="overview" role="tabpanel"><?php devdsame_render_dashboard_tab($s); ?></div>
             <div class="dd-tabpanel<?php echo $tab === 'review' ? ' is-active' : ''; ?>" data-dd-panel="review" role="tabpanel"><?php devdsame_render_review_tab($s); ?></div>
             <div class="dd-tabpanel<?php echo $tab === 'trash' ? ' is-active' : ''; ?>" data-dd-panel="trash" role="tabpanel"><?php devdsame_render_trash_tab($s); ?></div>
             <div class="dd-tabpanel<?php echo $tab === 'backup' ? ' is-active' : ''; ?>" data-dd-panel="backup" role="tabpanel"><?php devdsame_render_backup_tab(); ?></div>
@@ -711,7 +715,7 @@ function devdsame_render_review_tab($s)
     ?>
     <div class="max-w-5xl px-6 py-6" id="mc-review" data-scan="<?php echo (int) $scan_id; ?>" data-scan-disk="<?php echo (int) $disk_scan_id; ?>" data-preset="<?php echo esc_attr($preset); ?>" data-large="<?php echo (int) $large_threshold; ?>">
         <?php if ($never_scanned) : ?>
-            <div class="dd-banner dd-banner-watch"><?php esc_html_e('Run a scan from the Dashboard first to populate the review screen.', 'devdome-safe-media-cleaner'); ?></div>
+            <div class="dd-banner dd-banner-watch"><?php esc_html_e('Run a scan from the Overview tab first to populate the review screen.', 'devdome-safe-media-cleaner'); ?></div>
         <?php else : ?>
             <?php
             // Land on the first bucket that actually has content — opening "Review" onto an
@@ -928,7 +932,7 @@ function devdsame_render_backup_section($scope, $title, $backups)
             <div class="mc-progress"><span class="mc-progress-bar"></span></div>
         </div>
         <?php if (!$rows) : ?>
-            <div class="dd-empty" style="padding:12px 0;text-align:left;"><?php esc_html_e('No backups yet. Use Create Backup on the Dashboard.', 'devdome-safe-media-cleaner'); ?></div>
+            <div class="dd-empty" style="padding:12px 0;text-align:left;"><?php esc_html_e('No backups yet. Use Create Backup on the Overview tab.', 'devdome-safe-media-cleaner'); ?></div>
         <?php else : ?>
             <table class="mc-bk-table">
                 <thead>
@@ -983,7 +987,7 @@ function devdsame_render_backup_tab()
 
         <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:10px;padding:12px 16px;margin:0 0 16px;font-size:13px;line-height:1.6;color:#3730a3;">
             <strong><?php esc_html_e('How backups work:', 'devdome-safe-media-cleaner'); ?></strong>
-            <?php esc_html_e('every backup is a full ZIP snapshot of your images, saved on this server in /uploads/devdome-smc-backups. Create one from the Dashboard before you clean anything. Restore puts every file back exactly where it was.', 'devdome-safe-media-cleaner'); ?>
+            <?php esc_html_e('every backup is a full ZIP snapshot of your images, saved on this server in /uploads/devdome-smc-backups. Create one from the Overview tab before you clean anything. Restore puts every file back exactly where it was.', 'devdome-safe-media-cleaner'); ?>
         </div>
 
         <?php
@@ -1046,7 +1050,7 @@ function devdsame_render_settings_tab()
                 <?php endif; ?>
                 <table class="dd-table">
                     <tr>
-                        <th class="dd-th"><?php esc_html_e('Monitoring & email alerts', 'devdome-safe-media-cleaner'); ?> <?php $tip(__('After each scan, aggregate media stats (counts and sizes only, never files) are sent to DevDome. DevDome tracks growth across your sites, shows a media-health dashboard in your account, and emails alerts to your account email.', 'devdome-safe-media-cleaner')); ?></th>
+                        <th class="dd-th"><?php esc_html_e('Monitoring & email alerts', 'devdome-safe-media-cleaner'); ?></th>
                         <td class="dd-td">
                             <?php if ($mc_account_id) : ?>
                                 <label class="dd-opt"><input type="checkbox" class="dd-check" name="mc_email_notifications_on" value="1" <?php checked($notif_on, 1); ?>> <?php esc_html_e('Enable DevDome Monitoring', 'devdome-safe-media-cleaner'); ?></label>
@@ -1062,15 +1066,17 @@ function devdsame_render_settings_tab()
                                         esc_html_e('Alerts are sent to your DevDome account email.', 'devdome-safe-media-cleaner');
                                     }
                                     ?>
+                                    <?php $tip(__('After each scan, aggregate media stats (counts and sizes only, never files) are sent to DevDome. DevDome tracks growth across your sites, shows a media-health dashboard in your account, and emails alerts to your account email.', 'devdome-safe-media-cleaner')); ?>
                                 </span>
                             <?php else : ?>
                                 <label class="dd-opt" style="opacity:.5;pointer-events:none;"><input type="checkbox" class="dd-check" disabled> <?php esc_html_e('Enable DevDome Monitoring', 'devdome-safe-media-cleaner'); ?></label>
+                                <p class="dd-hint"><?php esc_html_e('Connect a DevDome account to turn this on.', 'devdome-safe-media-cleaner'); ?> <?php $tip(__('After each scan, aggregate media stats (counts and sizes only, never files) are sent to DevDome. DevDome tracks growth across your sites, shows a media-health dashboard in your account, and emails alerts to your account email.', 'devdome-safe-media-cleaner')); ?></p>
                             <?php endif; ?>
                         </td>
                     </tr>
                     <?php if ($mc_account_id) : ?>
                     <tr data-mc-showif="mc_email_notifications_on">
-                        <th class="dd-th"><?php esc_html_e('Send notifications', 'devdome-safe-media-cleaner'); ?> <?php $tip(__('How often an alert email can be sent at most.', 'devdome-safe-media-cleaner')); ?></th>
+                        <th class="dd-th"><?php esc_html_e('Send notifications', 'devdome-safe-media-cleaner'); ?></th>
                         <td class="dd-td">
                             <?php devdsame_render_dropdown('mc_notification_frequency_days', $notif_freq, array(
                                 1  => __('Every day', 'devdome-safe-media-cleaner'),
@@ -1079,6 +1085,7 @@ function devdsame_render_settings_tab()
                                 14 => __('Every 14 days', 'devdome-safe-media-cleaner'),
                                 30 => __('Every 30 days', 'devdome-safe-media-cleaner'),
                             )); ?>
+                            <p class="dd-hint">At most one alert email in this period. <?php $tip(__('How often an alert email can be sent at most.', 'devdome-safe-media-cleaner')); ?></p>
                         </td>
                     </tr>
                     <?php endif; ?>
@@ -1089,17 +1096,20 @@ function devdsame_render_settings_tab()
                 <div class="dd-sec-head"><span class="dashicons dashicons-clock dd-ico"></span><h2 class="dd-h2"><?php esc_html_e('Scheduling & retention', 'devdome-safe-media-cleaner'); ?></h2></div>
                 <table class="dd-table">
                     <tr>
-                        <th class="dd-th"><?php esc_html_e('Scheduled scan', 'devdome-safe-media-cleaner'); ?> <?php $tip(__('Rescans your library automatically in the background so the dashboard numbers stay fresh.', 'devdome-safe-media-cleaner')); ?></th>
+                        <th class="dd-th"><?php esc_html_e('Scheduled scan', 'devdome-safe-media-cleaner'); ?></th>
                         <td class="dd-td">
                             <label class="dd-opt"><input type="checkbox" class="dd-check" name="mc_scheduled_scan_on" value="1" <?php checked($sched_days > 0); ?>> <?php esc_html_e('Scan automatically', 'devdome-safe-media-cleaner'); ?></label>
+                            <p class="dd-hint">Keeps the dashboard numbers fresh without a manual scan. <?php $tip(__('Rescans your library automatically in the background so the dashboard numbers stay fresh.', 'devdome-safe-media-cleaner')); ?></p>
                         </td>
                     </tr>
                     <tr data-mc-showif="mc_scheduled_scan_on">
-                        <th class="dd-th"><?php esc_html_e('Scan every', 'devdome-safe-media-cleaner'); ?> <?php $tip(__('How many days between automatic scans.', 'devdome-safe-media-cleaner')); ?></th>
-                        <td class="dd-td"><input type="number" min="1" max="999" name="mc_scheduled_scan_days" value="<?php echo (int) max(1, $sched_days ?: 7); ?>" class="dd-input" style="width:70px;margin-right:6px;"> <?php esc_html_e('days', 'devdome-safe-media-cleaner'); ?></td>
+                        <th class="dd-th"><?php esc_html_e('Scan every', 'devdome-safe-media-cleaner'); ?></th>
+                        <td class="dd-td"><input type="number" min="1" max="999" name="mc_scheduled_scan_days" value="<?php echo (int) max(1, $sched_days ?: 7); ?>" class="dd-input" style="width:70px;margin-right:6px;"> <?php esc_html_e('days', 'devdome-safe-media-cleaner'); ?>
+                            <p class="dd-hint">7 days is a good default for most sites. <?php $tip(__('How many days between automatic scans.', 'devdome-safe-media-cleaner')); ?></p>
+                        </td>
                     </tr>
                     <tr>
-                        <th class="dd-th"><?php esc_html_e('Auto-delete from Recycle Bin', 'devdome-safe-media-cleaner'); ?> <?php $tip(__('Off by default. When set, trashed files are permanently removed after this many days.', 'devdome-safe-media-cleaner')); ?></th>
+                        <th class="dd-th"><?php esc_html_e('Auto-delete from Recycle Bin', 'devdome-safe-media-cleaner'); ?></th>
                         <td class="dd-td">
                             <?php devdsame_render_dropdown('mc_auto_delete_days', (int) $auto, array(
                                 0  => __('Never (recommended)', 'devdome-safe-media-cleaner'),
@@ -1107,17 +1117,21 @@ function devdsame_render_settings_tab()
                                 14 => __('After 14 days', 'devdome-safe-media-cleaner'),
                                 30 => __('After 30 days', 'devdome-safe-media-cleaner'),
                             )); ?>
+                            <p class="dd-hint">Never is the safe choice, files stay restorable. <?php $tip(__('Off by default. When set, trashed files are permanently removed after this many days.', 'devdome-safe-media-cleaner')); ?></p>
                         </td>
                     </tr>
                     <tr>
-                        <th class="dd-th"><?php esc_html_e('Unused-growth alert', 'devdome-safe-media-cleaner'); ?> <?php $tip(__('When unused media grows past a size you set, an alert appears in your DevDome Suite dashboard. With DevDome Monitoring on, DevDome also emails you.', 'devdome-safe-media-cleaner')); ?></th>
+                        <th class="dd-th"><?php esc_html_e('Unused-growth alert', 'devdome-safe-media-cleaner'); ?></th>
                         <td class="dd-td">
                             <label class="dd-opt"><input type="checkbox" class="dd-check" name="mc_growth_alert_on" value="1" <?php checked($growth_b > 0); ?>> <?php esc_html_e('Alert me when unused media grows', 'devdome-safe-media-cleaner'); ?></label>
+                            <p class="dd-hint">Get told when unused media passes a size you set. <?php $tip(__('When unused media grows past a size you set, an alert appears in your DevDome Suite dashboard. With DevDome Monitoring on, DevDome also emails you.', 'devdome-safe-media-cleaner')); ?></p>
                         </td>
                     </tr>
                     <tr data-mc-showif="mc_growth_alert_on">
-                        <th class="dd-th"><?php esc_html_e('Alert when above', 'devdome-safe-media-cleaner'); ?> <?php $tip(__('The alert fires once unused media passes this size.', 'devdome-safe-media-cleaner')); ?></th>
-                        <td class="dd-td"><input type="number" step="1" min="1" name="mc_unused_growth_alert_mb" value="<?php echo esc_attr($growth_mb); ?>" class="dd-input" style="width:90px;margin-right:6px;"> MB</td>
+                        <th class="dd-th"><?php esc_html_e('Alert when above', 'devdome-safe-media-cleaner'); ?></th>
+                        <td class="dd-td"><input type="number" step="1" min="1" name="mc_unused_growth_alert_mb" value="<?php echo esc_attr($growth_mb); ?>" class="dd-input" style="width:90px;margin-right:6px;"> MB
+                            <p class="dd-hint">The size of unused media that triggers the alert. <?php $tip(__('The alert fires once unused media passes this size.', 'devdome-safe-media-cleaner')); ?></p>
+                        </td>
                     </tr>
                 </table>
             </div>
@@ -1126,28 +1140,33 @@ function devdsame_render_settings_tab()
                 <div class="dd-sec-head"><span class="dashicons dashicons-shield dd-ico"></span><h2 class="dd-h2"><?php esc_html_e('Protection rules', 'devdome-safe-media-cleaner'); ?></h2></div>
                 <table class="dd-table">
                     <tr>
-                        <th class="dd-th"><?php esc_html_e('Protect new uploads', 'devdome-safe-media-cleaner'); ?> <?php $tip(__('New images are often uploaded before the page that uses them is published. This keeps them out of the unused list for a while.', 'devdome-safe-media-cleaner')); ?></th>
+                        <th class="dd-th"><?php esc_html_e('Protect new uploads', 'devdome-safe-media-cleaner'); ?></th>
                         <td class="dd-td">
                             <label class="dd-opt"><input type="checkbox" class="dd-check" name="mc_protect_recent" value="1" <?php checked(devdsame_get_int('protect_recent', 1), 1); ?>> <?php esc_html_e('Skip recent uploads', 'devdome-safe-media-cleaner'); ?></label>
+                            <p class="dd-hint">Fresh uploads are skipped so unpublished pages keep their images. <?php $tip(__('New images are often uploaded before the page that uses them is published. This keeps them out of the unused list for a while.', 'devdome-safe-media-cleaner')); ?></p>
                         </td>
                     </tr>
                     <tr data-mc-showif="mc_protect_recent">
-                        <th class="dd-th"><?php esc_html_e('Skip uploads from the last', 'devdome-safe-media-cleaner'); ?> <?php $tip(__('Uploads newer than this are never marked unused.', 'devdome-safe-media-cleaner')); ?></th>
-                        <td class="dd-td"><input type="number" min="1" max="999" name="mc_recent_days" value="<?php echo (int) $recent; ?>" class="dd-input" style="width:70px;margin-right:6px;"> <?php esc_html_e('days', 'devdome-safe-media-cleaner'); ?></td>
+                        <th class="dd-th"><?php esc_html_e('Skip uploads from the last', 'devdome-safe-media-cleaner'); ?></th>
+                        <td class="dd-td"><input type="number" min="1" max="999" name="mc_recent_days" value="<?php echo (int) $recent; ?>" class="dd-input" style="width:70px;margin-right:6px;"> <?php esc_html_e('days', 'devdome-safe-media-cleaner'); ?>
+                            <p class="dd-hint">30 days covers most publishing workflows. <?php $tip(__('Uploads newer than this are never marked unused.', 'devdome-safe-media-cleaner')); ?></p>
+                        </td>
                     </tr>
                     <tr>
-                        <th class="dd-th"><?php esc_html_e('Protected sources', 'devdome-safe-media-cleaner'); ?> <?php $tip(__('Images owned by these features are never marked unused, even when no page mentions them.', 'devdome-safe-media-cleaner')); ?></th>
+                        <th class="dd-th"><?php esc_html_e('Protected sources', 'devdome-safe-media-cleaner'); ?></th>
                         <td class="dd-td">
                             <div style="display:flex;flex-direction:column;gap:8px;">
                                 <label class="dd-opt"><input type="checkbox" class="dd-check" name="mc_protect_woocommerce" value="1" <?php checked(devdsame_get_int('protect_woocommerce', 1), 1); ?>> <?php esc_html_e('WooCommerce images', 'devdome-safe-media-cleaner'); ?></label>
                                 <label class="dd-opt"><input type="checkbox" class="dd-check" name="mc_protect_theme_assets" value="1" <?php checked(devdsame_get_int('protect_theme_assets', 1), 1); ?>> <?php esc_html_e('Theme / customizer images', 'devdome-safe-media-cleaner'); ?></label>
                             </div>
+                            <p class="dd-hint">Images owned by these features are never marked unused. <?php $tip(__('Images owned by these features are never marked unused, even when no page mentions them.', 'devdome-safe-media-cleaner')); ?></p>
                         </td>
                     </tr>
                     <tr>
-                        <th class="dd-th"><?php esc_html_e('Confidence threshold', 'devdome-safe-media-cleaner'); ?> <?php $tip(__('How sure the scanner must be before calling an image unused (0-100). Below this score it goes to Needs review instead, and is never auto-selected. Recommended: 75.', 'devdome-safe-media-cleaner')); ?></th>
+                        <th class="dd-th"><?php esc_html_e('Confidence threshold', 'devdome-safe-media-cleaner'); ?></th>
                         <td class="dd-td">
                             <input type="number" min="0" max="100" name="mc_confidence_threshold" value="<?php echo (int) $threshold; ?>" class="dd-input" style="width:90px;">
+                            <p class="dd-hint">Recommended 75. Lower scores go to Needs review instead. <?php $tip(__('How sure the scanner must be before calling an image unused (0-100). Below this score it goes to Needs review instead, and is never auto-selected. Recommended: 75.', 'devdome-safe-media-cleaner')); ?></p>
                         </td>
                     </tr>
                 </table>
@@ -1157,7 +1176,7 @@ function devdsame_render_settings_tab()
                 <div class="dd-sec-head"><span class="dashicons dashicons-image-filter dd-ico"></span><h2 class="dd-h2"><?php esc_html_e('Detection', 'devdome-safe-media-cleaner'); ?></h2></div>
                 <table class="dd-table">
                     <tr>
-                        <th class="dd-th"><?php esc_html_e('CDN domains', 'devdome-safe-media-cleaner'); ?> <?php $tip(__('Serving images from a CDN? Add its base URL so images referenced by the CDN address still count as used. Without this they could be falsely listed as unused.', 'devdome-safe-media-cleaner')); ?></th>
+                        <th class="dd-th"><?php esc_html_e('CDN domains', 'devdome-safe-media-cleaner'); ?></th>
                         <td class="dd-td">
                             <div class="mc-chips">
                                 <div style="display:flex;gap:8px;align-items:flex-start;">
@@ -1167,10 +1186,11 @@ function devdsame_render_settings_tab()
                                 <div class="mc-chip-list"></div>
                                 <textarea name="mc_cdn_mappings" class="mc-chip-store" style="display:none;"><?php echo esc_textarea(implode("\n", array_keys($cdn))); ?></textarea>
                             </div>
+                            <p class="dd-hint">Add your CDN base URL so CDN-served images count as used. <?php $tip(__('Serving images from a CDN? Add its base URL so images referenced by the CDN address still count as used. Without this they could be falsely listed as unused.', 'devdome-safe-media-cleaner')); ?></p>
                         </td>
                     </tr>
                     <tr>
-                        <th class="dd-th"><?php esc_html_e('Never scan folders', 'devdome-safe-media-cleaner'); ?> <?php $tip(__('Folders inside /uploads that are always left alone, e.g. woocommerce_uploads or a folder another tool manages.', 'devdome-safe-media-cleaner')); ?></th>
+                        <th class="dd-th"><?php esc_html_e('Never scan folders', 'devdome-safe-media-cleaner'); ?></th>
                         <td class="dd-td">
                             <div class="mc-chips">
                                 <div style="display:flex;gap:8px;align-items:flex-start;">
@@ -1180,6 +1200,7 @@ function devdsame_render_settings_tab()
                                 <div class="mc-chip-list"></div>
                                 <textarea name="mc_never_scan_folders" class="mc-chip-store" style="display:none;"><?php echo esc_textarea(implode("\n", $nf)); ?></textarea>
                             </div>
+                            <p class="dd-hint">Folders inside /uploads the scanner always leaves alone. <?php $tip(__('Folders inside /uploads that are always left alone, e.g. woocommerce_uploads or a folder another tool manages.', 'devdome-safe-media-cleaner')); ?></p>
                         </td>
                     </tr>
                 </table>

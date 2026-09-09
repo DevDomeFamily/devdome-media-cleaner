@@ -51,8 +51,8 @@
         document.querySelectorAll('.dd-dd.is-open').forEach(function (dd) { dd.classList.remove('is-open'); });
     });
 
-    /* ---- Scan progress polling (shared by Dashboard scans + Review trash). All hooks are
-     * CLASSES updated together. The Dashboard is TWO tools (Media Library Cleaner + Disk
+    /* ---- Scan progress polling (shared by Overview scans + Review trash). All hooks are
+     * CLASSES updated together. The Overview is TWO tools (Media Library Cleaner + Disk
      * Cleaner), each with its own progress wrap tagged data-mc-scope="library|disk" — only
      * the wrap matching the running job's scope is shown (untagged wraps always show). ---- */
     var pollTimer = null;
@@ -143,7 +143,7 @@
         }, 900);
     }
 
-    /* ---- Dashboard: scan + backup + retry buttons (backup ids hit start-backup). ---- */
+    /* ---- Overview: scan + backup + retry buttons (backup ids hit start-backup). ---- */
     var jobButtons = ['mc-scan-btn', 'mc-disk-scan-btn', 'mc-backup-btn', 'mc-disk-backup-btn', 'mc-retry-btn', 'mc-clean-btn', 'mc-disk-clean-btn'].map(function (id) { return document.getElementById(id); }).filter(Boolean);
     function setJobButtons(disabled) { jobButtons.forEach(function (b) { b.disabled = disabled; }); }
     function startJob(btn, what) {

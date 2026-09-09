@@ -109,7 +109,6 @@ function devdcorev1_hub_handle_install()
     require_once ABSPATH . 'wp-admin/includes/plugin.php';
     require_once ABSPATH . 'wp-admin/includes/plugin-install.php';
     require_once ABSPATH . 'wp-admin/includes/file.php';
-    require_once ABSPATH . 'wp-admin/includes/misc.php';
     require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
 
     $result = 'fail';
@@ -124,15 +123,9 @@ function devdcorev1_hub_handle_install()
         $upgrader  = new Plugin_Upgrader(new WP_Ajax_Upgrader_Skin());
         $installed = $upgrader->install($api->download_link);
         if (!is_wp_error($installed) && $installed === true) {
+            // Install only. The plugin stays INACTIVE until the owner clicks Activate on its
+            // card (a separate, explicit action); nothing is ever activated on their behalf.
             $result = 'installed';
-            // Install leaves the plugin INACTIVE (so it never self-registers); activate it so the card flips.
-            $file = isset($catalog[$slug]['plugin_file']) ? (string) $catalog[$slug]['plugin_file'] : '';
-            if ($file && current_user_can('activate_plugins')) {
-                $act = activate_plugin($file);
-                if (!is_wp_error($act)) {
-                    $result = 'active';
-                }
-            }
         }
     }
 
@@ -162,9 +155,6 @@ if (!function_exists('devdcorev1_hub_install_notice')) {
 
         if ($res === 'activated') {
             return '<div class="dd-hub-connect" data-ddnotice="1" style="border-color:#a7f3d0;background:#ecfdf5;"><span class="dashicons dashicons-yes-alt" style="color:#059669;"></span><div class="dd-hub-connect-body"><strong>' . esc_html($name) . ' is active.</strong></div></div>';
-        }
-        if ($res === 'active') {
-            return '<div class="dd-hub-connect" data-ddnotice="1" style="border-color:#a7f3d0;background:#ecfdf5;"><span class="dashicons dashicons-yes-alt" style="color:#059669;"></span><div class="dd-hub-connect-body"><strong>' . esc_html($name) . ' is installed and active.</strong></div></div>';
         }
         if ($res === 'installed') {
             return '<div class="dd-hub-connect" data-ddnotice="1"><span class="dashicons dashicons-info"></span><div class="dd-hub-connect-body"><strong>' . esc_html($name) . ' is installed.</strong><span>Activate it from the list below.</span></div></div>';

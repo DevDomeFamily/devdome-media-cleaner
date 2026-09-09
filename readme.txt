@@ -4,7 +4,7 @@ Tags: media cleaner, unused images, unused media, duplicate images, orphaned ima
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.8
+Stable tag: 1.0.9
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -263,7 +263,7 @@ Yes. Scans, cleanups, backups, and restores run on the server in background batc
 
 == Screenshots ==
 
-1. Dashboard: view Media Library and Disk Storage cleanup opportunities, storage totals, and scan actions.
+1. Overview: view Media Library and Disk Storage cleanup opportunities, storage totals, and scan actions.
 2. Media Library review: inspect unused images with status labels, reasons, filters, and bulk selection.
 3. Disk Storage review: find orphaned files in the uploads folder that have no Media Library record.
 4. Recycle Bin: review cleanup batches and restore cleaned files with one click.
@@ -271,6 +271,11 @@ Yes. Scans, cleanups, backups, and restores run on the server in background batc
 6. Settings: configure scheduled scans, retention, protection rules, and optional DevDome Monitoring.
 
 == Changelog ==
+
+= 1.0.9 =
+* First tab is now called Overview, in line with the other DevDome plugins. Old links to the Dashboard tab still open it.
+* Settings: every option now shows a one line hint under the control, with the info icon holding the full explanation, the same layout as DevDome Malware Scanner.
+* DevDome Dashboard: installing another DevDome plugin from the dashboard no longer activates it, you activate it yourself from its card. Output escaping tightened.
 
 = 1.0.8 =
 * DevDome Dashboard: plugin list, descriptions, logos and versions now come from devdome.com, one-click install of DevDome plugins from WordPress.org, Docs link and Fix buttons, Activate stays on the dashboard.

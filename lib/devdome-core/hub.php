@@ -39,19 +39,38 @@ function devdcorev1_hub_catalog()
         'devdome-site-monitor'     => array('name' => 'Site Monitor',     'icon' => 'dashicons-heart',       'desc' => 'Uptime, speed, security, SEO &amp; affiliate health in one dashboard.',     'get_url' => 'https://devdome.com/site-monitor',     'position' => 20,  'wporg_slug' => '', 'listed' => false, 'plugin_file' => 'devdome-site-monitor/devdome-site-monitor.php'),
         'devdome-bot-protection'   => array('name' => 'Bot Protection',   'icon' => 'dashicons-shield',      'desc' => 'Block fake clicks &amp; bot traffic so your stats stay real.',               'get_url' => 'https://devdome.com/bot-protection',   'position' => 30,  'wporg_slug' => '', 'listed' => false, 'plugin_file' => 'devdome-bot-protection/devdome-bot-protection.php'),
         'devdome-security-scanner' => array('name' => 'Security Scanner', 'icon' => 'dashicons-shield-alt',  'desc' => 'Scan for malware, vulnerabilities &amp; hardening gaps.',                    'get_url' => 'https://devdome.com/security-scanner', 'position' => 40,  'wporg_slug' => '', 'listed' => false, 'plugin_file' => 'devdome-security-scanner/devdome-security-scanner.php'),
-        'devdome-redirect-manager' => array('name' => 'Redirect Manager', 'icon' => 'dashicons-randomize',   'desc' => 'Rule-based redirects &amp; smart affiliate links with per-rule stats.',              'get_url' => 'https://devdome.com/redirect-manager', 'position' => 50,  'wporg_slug' => '', 'listed' => false, 'plugin_file' => 'devdome-redirect-manager/devdome-redirect-manager.php'),
-        'devdome-affiliate-manager'=> array('name' => 'Affiliate Manager','icon' => 'dashicons-admin-links', 'desc' => 'Sitewide affiliate tags, geo-routing, link scanning &amp; click stats.',      'get_url' => 'https://devdome.com/affiliate-manager','position' => 60,  'wporg_slug' => '', 'listed' => false, 'plugin_file' => 'devdome-affiliate-manager/devdome-affiliate-manager.php'),
+        'devdome-redirect-manager' => array('name' => 'Redirect Manager', 'icon' => 'dashicons-randomize',   'desc' => 'Rule-based redirects &amp; smart affiliate links with per-rule stats.',              'get_url' => 'https://devdome.com/wp-plugins/redirect-manager/', 'position' => 50,  'wporg_slug' => 'devdome-redirect-manager', 'listed' => true, 'plugin_file' => 'devdome-redirect-manager/devdome-redirect-manager.php'),
+        'devdome-affiliate-manager'=> array('name' => 'Affiliate Manager','icon' => 'dashicons-admin-links', 'desc' => 'Sitewide affiliate tags, geo-routing, link scanning &amp; click stats.',      'get_url' => 'https://devdome.com/wp-plugins/affiliate-manager/','position' => 60,  'wporg_slug' => 'devdome-affiliate-manager', 'listed' => true, 'plugin_file' => 'devdome-affiliate-manager/devdome-affiliate-manager.php'),
         'devdome-product-importer' => array('name' => 'Product Importer', 'icon' => 'dashicons-cart',        'desc' => 'Import Amazon products into WooCommerce with AI content &amp; transit links.', 'get_url' => 'https://devdome.com/product-importer', 'position' => 70,  'wporg_slug' => '', 'listed' => false, 'plugin_file' => 'devdome-product-importer/devdome-product-importer.php'),
         'devdome-safe-media-cleaner'    => array('name' => 'Safe Media Cleaner', 'icon' => 'dashicons-format-image','desc' => 'Find unused images, orphaned files &amp; duplicates. Recycle Bin restore.',                      'get_url' => 'https://devdome.com/wp-plugins/safe-media-cleaner/',    'position' => 80,  'wporg_slug' => 'devdome-safe-media-cleaner', 'listed' => true, 'plugin_file' => 'devdome-safe-media-cleaner/devdome-safe-media-cleaner.php'),
+        'devdome-link-monitor'     => array('name' => 'Link Monitor',     'icon' => 'dashicons-editor-unlink', 'desc' => 'Find broken links and monitor 404s, with a conservative checker that says unverified instead of guessing.', 'get_url' => 'https://devdome.com/wp-plugins/link-monitor/', 'position' => 85,  'wporg_slug' => 'devdome-link-monitor', 'listed' => true, 'plugin_file' => 'devdome-link-monitor/devdome-link-monitor.php'),
+        'devdome-malware-scanner'  => array('name' => 'Malware Scanner',  'icon' => 'dashicons-shield-alt',  'desc' => 'Malware and backdoor scanner: file integrity, database injections, rogue admins, cron persistence, quarantine and one-click repair.', 'get_url' => 'https://devdome.com/wp-plugins/', 'position' => 45,  'wporg_slug' => '', 'listed' => false, 'plugin_file' => 'devdome-malware-scanner/devdome-malware-scanner.php'),
         'devdome-admin-cleaner'    => array('name' => 'Admin Cleaner',    'icon' => 'dashicons-hidden',      'desc' => 'Hide admin nags, declutter the dashboard &amp; create safer client screens.', 'get_url' => 'https://devdome.com/admin-cleaner',    'position' => 90,  'wporg_slug' => '', 'listed' => false, 'plugin_file' => 'devdome-admin-cleaner/devdome-admin-cleaner.php'),
         'devdome-backup-migration' => array('name' => 'Backup &amp; Recovery', 'icon' => 'dashicons-backup', 'desc' => 'Reversible updates: a restore point, verify &amp; auto-rollback on every update.', 'get_url' => 'https://devdome.com/backup-migration', 'position' => 100, 'wporg_slug' => '', 'listed' => false, 'plugin_file' => 'devdome-backup-migration/devdome-backup-migration.php'),
     );
-    // The live list comes from devdome.com (names, descriptions, links, logos, wp.org slugs) so an
-    // old bundled core still shows the current plugin lineup. The list above is the offline fallback.
+    // The live list comes from devdome.com (names, descriptions, links, logos, versions) so an
+    // old bundled core still shows the current plugin lineup. The list above is the offline fallback
+    // AND the only source of installer identity: wporg_slug / plugin_file are compiled in here and
+    // are never taken from the network (the sanitizer drops them), so a wrong or tampered catalog can
+    // only change what a card says, never which WordPress.org plugin an Install click fetches.
     foreach (devdcorev1_hub_remote_catalog() as $slug => $row) {
+        unset($row['wporg_slug'], $row['plugin_file']); // also covers a catalog cached by an older core
         $list[$slug] = isset($list[$slug]) && is_array($list[$slug]) ? array_merge($list[$slug], $row) : $row;
     }
     return apply_filters('devdcorev1_hub_catalog', $list);
+}
+
+/**
+ * True once this site is connected to a DevDome account (the stored connection state, no remote
+ * call). The catalog fetch is opt-in by connection; disconnected sites never contact devdome.com.
+ */
+function devdcorev1_hub_catalog_consented()
+{
+    if ('' === (string) get_option('devdcorev1_site_token', '')) {
+        return false;
+    }
+    $state = get_option('devdcorev1_conn_state', array());
+    return is_array($state) && !empty($state['ok']);
 }
 
 /** Where the live catalog lives. A plain JSON file, fetched at most once every 12 hours. */
@@ -70,6 +89,11 @@ function devdcorev1_hub_remote_catalog()
     static $memo = null;
     if (is_array($memo)) {
         return $memo;
+    }
+    // Consent gate (1.6.5): devdome.com is contacted for the catalog only once the site owner has
+    // connected a DevDome account. Before that the bundled list above is all the hub shows.
+    if (!devdcorev1_hub_catalog_consented()) {
+        return $memo = array();
     }
     $cached = get_site_transient('devdcorev1_hub_catalog_remote');
     if (is_array($cached)) {
@@ -111,12 +135,8 @@ function devdcorev1_hub_sanitize_catalog_row($row)
             $out['get_url'] = $u;
         }
     }
-    if (isset($row['wporg_slug']) && preg_match('/^[a-z0-9-]{0,60}$/', (string) $row['wporg_slug'])) {
-        $out['wporg_slug'] = (string) $row['wporg_slug'];
-    }
-    if (isset($row['plugin_file']) && preg_match('#^[a-z0-9-]+/[a-z0-9-]+\.php$#', (string) $row['plugin_file'])) {
-        $out['plugin_file'] = (string) $row['plugin_file'];
-    }
+    // wporg_slug / plugin_file are deliberately NOT accepted from the remote catalog (1.6.4): the
+    // installer identity stays compiled into devdcorev1_hub_catalog().
     if (isset($row['logo'])) {
         $attrs = array('d' => true, 'cx' => true, 'cy' => true, 'r' => true, 'rx' => true, 'ry' => true, 'x' => true, 'y' => true,
             'x1' => true, 'y1' => true, 'x2' => true, 'y2' => true, 'width' => true, 'height' => true, 'points' => true,
@@ -494,8 +514,7 @@ function devdcorev1_hub_render_default()
     ?>
     <div class="dd-app">
         <?php
-        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- returns fully-escaped HTML.
-        if (function_exists('devdcorev1_hub_install_notice')) { echo devdcorev1_hub_install_notice(); }
+        if (function_exists('devdcorev1_hub_install_notice')) { echo wp_kses_post(devdcorev1_hub_install_notice()); }
         ?>
         <!-- header bar: the suite-wide §14 frame (white bar, brand badge, title, bug report) -->
         <div class="ddh-bar">
@@ -581,7 +600,7 @@ function devdcorev1_hub_render_default()
                             <div class="ddh-rver">v<?php echo esc_html($r['version'] ? $r['version'] : '1.0'); ?><?php if ($new_ver !== '') : ?> <span class="ddh-up">&rarr; v<?php echo esc_html($new_ver); ?></span><?php if ($upd_url) : ?><a class="ddh-upbtn" href="<?php echo esc_url($upd_url); ?>" data-dd-plugin="<?php echo esc_attr($pf); ?>" data-dd-ver="<?php echo esc_attr($new_ver); ?>" data-dd-nonce="<?php echo esc_attr(wp_create_nonce('updates')); ?>" onclick="event.stopPropagation()"><?php echo $ic_update; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>Update</a><?php endif; ?><?php endif; ?></div>
                         </div><?php if (!empty($r['desc'])) : ?><div class="ddh-rsub"><?php echo esc_html(wp_strip_all_tags($r['desc'])); ?></div><?php endif; ?></div></div>
                         <?php if ($has) : ?>
-                            <span class="ddh-st warn"><span class="dot"></span><?php echo (int) count($r_issues); ?> Issue<?php echo count($r_issues) === 1 ? '' : 's'; ?><span class="caret"><?php echo $ic_caret; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></span></span>
+                            <span class="ddh-st warn"><span class="dot"></span><?php echo (int) count($r_issues); ?> Issue<?php echo esc_html(count($r_issues) === 1 ? '' : 's'); ?><span class="caret"><?php echo $ic_caret; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></span></span>
                         <?php else : ?>
                             <span class="ddh-st ok"><?php echo $ic_check; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>No Issues</span>
                         <?php endif; ?>
@@ -628,8 +647,7 @@ function devdcorev1_hub_render_default()
                             <?php if (!empty($r['get_url'])) : ?><a class="ddh-btn ddh-btn-ghost ddh-docs" href="<?php echo esc_url($r['get_url']); ?>" target="_blank" rel="noopener" onclick="event.stopPropagation()">Docs</a><?php endif; ?>
                             <?php
                             if (function_exists('devdcorev1_hub_install_actions')) {
-                                // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- esc_url-built anchor HTML.
-                                echo devdcorev1_hub_install_actions($r);
+                                echo wp_kses_post(devdcorev1_hub_install_actions($r));
                             } else { ?>
                                 <a class="ddh-btn ddh-btn-solid" href="<?php echo esc_url($r['get_url']); ?>" target="_blank" rel="noopener"><?php echo $ic_dl; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>Get it</a>
                             <?php } ?>

@@ -52,4 +52,4 @@ if (!class_exists('DEVDCOREV1_Loader')) {
     add_action('plugins_loaded', array('DEVDCOREV1_Loader', 'load'), -100);
 }
 
-DEVDCOREV1_Loader::register('1.6.3', __DIR__ . '/devdome-core.php');
+DEVDCOREV1_Loader::register('1.6.5', __DIR__ . '/devdome-core.php');
