@@ -4,7 +4,7 @@ Tags: media cleaner, unused images, unused media, duplicate images, orphaned ima
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.9
+Stable tag: 1.0.10
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -271,6 +271,9 @@ Yes. Scans, cleanups, backups, and restores run on the server in background batc
 6. Settings: configure scheduled scans, retention, protection rules, and optional DevDome Monitoring.
 
 == Changelog ==
+
+= 1.0.10 =
+* Connect fix (shared DevDome core 1.6.6): the connect claim now waits up to 30 seconds and keeps the handshake for 20 minutes so a refresh retries it, the DevDome hub shows why a connect failed with a Try again link, and the verify file is served through a query form for hosts that answer /.well-known/ before WordPress.
 
 = 1.0.9 =
 * First tab is now called Overview, in line with the other DevDome plugins. Old links to the Dashboard tab still open it.
