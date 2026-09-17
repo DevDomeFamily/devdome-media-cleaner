@@ -25,6 +25,26 @@ defined('ABSPATH') || exit;
  * @return array{ids:array<int,bool>, urls:string[], strings:string} where 'strings' is one big
  *         lowercased haystack of all scanned text/meta/option content for substring URL/path matching.
  */
+/**
+ * Integers stored in a serialized or JSON blob, the way plugins keep attachment ids:
+ * serialized (i:12; "12";) and JSON ([12,34], ["12"], {"image_id":12}). Fills $mm[1] like
+ * preg_match_all would; over-collecting is the safe direction (an id that is no attachment
+ * protects nothing).
+ */
+function devdsame_ids_in_blob($v, &$mm)
+{
+    $found = array();
+    if (preg_match_all('/(?:i:|")(\d{1,9})(?:";|;)/', $v, $m1)) {
+        $found = $m1[1];
+    }
+    $first = substr(ltrim($v), 0, 1);
+    if (($first === '[' || $first === '{') && preg_match_all('/[\[,:]\s*"?(\d{1,9})"?\s*(?=[,\]}])/', $v, $m2)) {
+        $found = array_merge($found, $m2[1]);
+    }
+    $mm = array(null, array_values(array_unique($found)));
+    return !empty($found);
+}
+
 function devdsame_used_set($scan_id = 0)
 {
     if (!isset($GLOBALS['devdsame_usedset']) || $GLOBALS['devdsame_usedset_scan'] !== $scan_id) {
@@ -86,6 +106,8 @@ function devdsame_build_used_set()
     $haystack = '';
     $cap = devdsame_haystack_cap();
     $truncated = false;
+    $GLOBALS['devdsame_db_failed'] = '';
+    $GLOBALS['devdsame_haystack_truncated'] = false;
 
     // ---- 1. Post content + excerpt across ALL post types incl. revisions, reusable blocks,
     //         templates and template parts. Chunked by ID range.
@@ -100,6 +122,10 @@ function devdsame_build_used_set()
             $last,
             $chunk
         ));
+        if ($wpdb->last_error !== '') {
+            devdsame_db_read_failed();
+            break;
+        }
         if (!$rows) {
             break;
         }
@@ -133,6 +159,10 @@ function devdsame_build_used_set()
     $site_icon = (int) get_option('site_icon', 0);
     if ($site_icon) {
         $ids[$site_icon] = true;
+    }
+    $woo_placeholder = (int) get_option('woocommerce_placeholder_image', 0); // bare id, used on every product without an image
+    if ($woo_placeholder) {
+        $ids[$woo_placeholder] = true;
     }
     $header = get_custom_header();
     if ($header && !empty($header->attachment_id)) {
@@ -168,7 +198,7 @@ function devdsame_build_used_set()
     return array(
         'ids'       => $ids,
         'haystack'  => $haystack,
-        'truncated' => $truncated,
+        'truncated' => $truncated || !empty($GLOBALS['devdsame_db_failed']) || !empty($GLOBALS['devdsame_haystack_truncated']), // a failed read = an incomplete set: downgrade, never "unused"
     );
 }
 
@@ -250,6 +280,10 @@ function devdsame_collect_meta($table, $owner_col, &$ids, &$haystack, &$truncate
             $last,
             $chunk
         ));
+        if ($wpdb->last_error !== '') {
+            devdsame_db_read_failed();
+            break;
+        }
         if (!$rows) {
             break;
         }
@@ -270,8 +304,9 @@ function devdsame_collect_meta($table, $owner_col, &$ids, &$haystack, &$truncate
             $lv = strtolower($v);
             // Serialized arrays of IDs (ACF gallery, Woo gallery): pull out integers when the
             // value is a serialized list of ints.
-            if (strpos($lv, 'uploads') === false && (strpos($lv, 'a:') === 0 || strpos($lv, '[') === 0)) {
-                if (preg_match_all('/(?:i:|")(\d{1,9})(?:";|;)/', $v, $mm)) {
+            // Ids are collected even when the blob also carries a URL: {"image_id":12,"url":"..."} must keep 12.
+            if (strpos($lv, 'a:') === 0 || strpos($lv, '[') === 0 || strpos($lv, '{') === 0) {
+                if (devdsame_ids_in_blob($v, $mm)) {
                     foreach ($mm[1] as $maybe) {
                         $maybe = (int) $maybe;
                         if ($maybe) {
@@ -303,16 +338,20 @@ function devdsame_collect_options(&$ids, &$haystack, &$truncated = false, $cap =
     if ($cap <= 0) {
         $cap = devdsame_haystack_cap();
     }
-    $needle = 'uploads';
+    $needle = strtolower(wp_basename(devdsame_uploads_baseurl())); // the real uploads folder name (a custom UPLOADS dir is not "uploads")
     $last = 0;
     $chunk = 500;
     do {
         // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- chunked sweep over core options; option_id bound via prepare.
         $rows = $wpdb->get_results($wpdb->prepare(
-            "SELECT option_id, option_value FROM {$wpdb->options} WHERE option_id > %d ORDER BY option_id ASC LIMIT %d",
+            "SELECT option_id, option_name, option_value FROM {$wpdb->options} WHERE option_id > %d ORDER BY option_id ASC LIMIT %d",
             $last,
             $chunk
         ));
+        if ($wpdb->last_error !== '') {
+            devdsame_db_read_failed();
+            break;
+        }
         if (!$rows) {
             break;
         }
@@ -323,12 +362,20 @@ function devdsame_collect_options(&$ids, &$haystack, &$truncated = false, $cap =
                 continue;
             }
             $lv = strtolower($v);
-            if (strpos($lv, $needle) !== false) {
+            $has_url = strpos($lv, $needle) !== false;
+            if ($has_url) {
                 devdsame_collect_ids_from_content($v, $ids);
                 devdsame_haystack_append($haystack, $truncated, $cap, "\n" . $lv);
-            } elseif (strpos($lv, 'a:') === 0 || strpos($lv, '{') === 0) {
+            }
+            // Serialized or JSON blobs (arrays included) are mined for ids on top of the URL pass
+            // when the option looks image-related by its VALUE, its NAME, or the URL it carries.
+            if (strpos($lv, 'a:') === 0 || strpos($lv, '[') === 0 || strpos($lv, '{') === 0) {
                 // Possible theme-mod / customizer / widget array holding image IDs.
-                if (preg_match_all('/(?:i:|")(\d{1,9})(?:";|;)/', $v, $mm) && strpos($lv, 'logo') !== false) {
+                // Serialized option blobs that look image-related (theme options, widgets, sliders)
+                // often store bare attachment ids: collect every integer in them. Over-protective by
+                // design (an id that is not an attachment protects nothing).
+                $kw = '/logo|image|icon|thumb|media|attachment|photo|banner|background|avatar|gallery|slide|theme_mods|widget/';
+                if (($has_url || preg_match($kw, $lv) || preg_match($kw, strtolower((string) $r->option_name))) && devdsame_ids_in_blob($v, $mm)) {
                     foreach ($mm[1] as $maybe) {
                         $maybe = (int) $maybe;
                         if ($maybe) {

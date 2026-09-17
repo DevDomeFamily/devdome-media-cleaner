@@ -6,7 +6,7 @@
  *   wp devdome media report [--format=table|json]
  *   wp devdome media list [--status=unused] [--limit=50]
  *   wp devdome media status
- *   wp devdome media trash --batch=<id> | --selected
+ *   wp devdome media trash [--selected] [--dry-run]   (moves the latest scan's auto-selected unused items into a NEW batch)
  *   wp devdome media restore --batch=<id>
  *   wp devdome media delete --batch=<id> [--yes]
  *
@@ -46,6 +46,10 @@ if (defined('WP_CLI') && WP_CLI) {
             $done = 0;
             do {
                 $res = devdsame_scan_chunk($scan_id, $cursor, 200);
+                if (!empty($res['error'])) {
+                    devdsame_fail_scan($scan_id, (string) $res['error']);
+                    WP_CLI::error('Scan failed: ' . $res['error']);
+                }
                 $cursor = $res['last_id'];
                 $done += $res['processed'];
                 if ($progress) {
@@ -60,11 +64,19 @@ if (defined('WP_CLI') && WP_CLI) {
             $fs_offset = 0;
             do {
                 $fs_res = devdsame_scan_filesystem($scan_id, 100000, $fs_offset);
+                if (!empty($fs_res['error'])) {
+                    devdsame_fail_scan($scan_id, (string) $fs_res['error']);
+                    WP_CLI::error('Scan failed: ' . $fs_res['error']);
+                }
                 $fs_offset = (int) $fs_res['offset'];
             } while (empty($fs_res['done']));
             $score = devdsame_finalize_scan($scan_id);
-            devdsame_update_setting('last_scan_id', (int) $scan_id);
-            devdsame_update_setting('last_scan_at', time());
+            if ($score === false) {
+                WP_CLI::error('Scan failed: the results could not be counted (database read failed).');
+            }
+            if (!devdsame_update_setting('last_scan_id', (int) $scan_id) || !devdsame_update_setting('last_scan_at', time())) {
+                WP_CLI::error('The scan finished but its pointer could not be saved (database write failed); the dashboard still shows the previous scan.');
+            }
 
             $s = devdsame_hub_summary();
             WP_CLI::success(sprintf(
@@ -144,6 +156,9 @@ if (defined('WP_CLI') && WP_CLI) {
                 $status,
                 $limit
             ), ARRAY_A);
+            if ($wpdb->last_error !== '') {
+                WP_CLI::error('The scan results could not be read (database error): ' . $wpdb->last_error);
+            }
             $out = array();
             foreach ((array) $rows as $r) {
                 $out[] = array(
@@ -174,6 +189,9 @@ if (defined('WP_CLI') && WP_CLI) {
             $scan_id = devdsame_latest_scan_id();
             // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- CLI selection read over internal scan_items; values bound via prepare.
             $ids = $wpdb->get_col($wpdb->prepare("SELECT id FROM {$items} WHERE scan_id=%d AND status='unused' AND is_selected=1", $scan_id));
+            if ($wpdb->last_error !== '') {
+                WP_CLI::error('The selection could not be read (database error): ' . $wpdb->last_error);
+            }
             $ids = array_map('intval', (array) $ids);
             if (!$ids) {
                 WP_CLI::warning('Nothing selected to trash.');
@@ -183,18 +201,30 @@ if (defined('WP_CLI') && WP_CLI) {
                 WP_CLI::log(sprintf('[dry-run] Would move %d items to Recycle Bin.', count($ids)));
                 return;
             }
-            $batch_id = devdsame_create_trash_batch(0, 'wp-cli');
-            if (!$batch_id) {
-                WP_CLI::error('Could not create a Recycle Bin batch (folder not writable?).');
+            // Same rule as the queue and the restore/delete helpers: one writer owns the bin.
+            if (devdsame_job_active() || !devdsame_acquire_tick_lock()) {
+                WP_CLI::error('Another operation owns the Recycle Bin right now (a running job or a request in flight). Try again in a minute.');
             }
-            $ok = 0;
-            $err = 0;
-            foreach ($ids as $id) {
-                $r = devdsame_trash_item($batch_id, $id);
-                is_wp_error($r) ? $err++ : $ok++;
+            try {
+                $batch_id = devdsame_create_trash_batch(0, 'wp-cli');
+                if (!$batch_id) {
+                    WP_CLI::error('Could not create a Recycle Bin batch (folder not writable?).', false);
+                    return;
+                }
+                $ok = 0;
+                $err = 0;
+                foreach ($ids as $id) {
+                    $r = devdsame_trash_item($batch_id, $id);
+                    is_wp_error($r) ? $err++ : $ok++;
+                }
+                devdsame_finalize_trash_batch($batch_id);
+            } finally {
+                devdsame_release_tick_lock();
             }
-            devdsame_finalize_trash_batch($batch_id);
             devdsame_refresh_summary($scan_id);
+            if ($err > 0) {
+                WP_CLI::error(sprintf('Batch #%d: moved %d, skipped %d. See the error log for the skipped files.', $batch_id, $ok, $err));
+            }
             WP_CLI::success(sprintf('Batch #%d: moved %d, skipped %d.', $batch_id, $ok, $err));
         }
 
@@ -211,6 +241,9 @@ if (defined('WP_CLI') && WP_CLI) {
                 WP_CLI::error('Pass --batch=<id>.');
             }
             $res = devdsame_restore_batch($batch);
+            if ($res['errors'] > 0) {
+                WP_CLI::error(sprintf('Restored %d, errors %d. The failed files stay in the Recycle Bin; see the error log.', $res['restored'], $res['errors']));
+            }
             WP_CLI::success(sprintf('Restored %d, errors %d.', $res['restored'], $res['errors']));
         }
 
@@ -232,6 +265,9 @@ if (defined('WP_CLI') && WP_CLI) {
             WP_CLI::confirm(sprintf('Permanently delete every file in batch #%d? This cannot be undone.', $batch), $assoc);
             $res = devdsame_permanent_delete_batch($batch);
             devdsame_refresh_summary(devdsame_latest_scan_id());
+            if ($res['errors'] > 0) {
+                WP_CLI::error(sprintf('Deleted %d, errors %d. The failed files stay in the Recycle Bin; see the error log.', $res['deleted'], $res['errors']));
+            }
             WP_CLI::success(sprintf('Deleted %d, errors %d.', $res['deleted'], $res['errors']));
         }
     }

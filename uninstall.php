@@ -23,6 +23,11 @@ function devdsame_uninstall_site()
         $wpdb->query("DROP TABLE IF EXISTS {$p}{$t}");
     }
 
+    // Attachments hidden from the Media Library while their files sat in the Recycle Bin must
+    // not stay hidden forever once the plugin that could restore them is gone.
+    delete_post_meta_by_key('_devdsame_trashed');
+    delete_post_meta_by_key('_devdsame_reregistered');
+
     delete_option('devdsame_hub_summary');
     delete_option('devdsame_tick_lock');
     delete_option('devdsame_tick_key');
@@ -32,18 +37,22 @@ function devdsame_uninstall_site()
     // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- one-time uninstall transient sweep.
     $wpdb->query("DELETE FROM {$wpdb->options} WHERE option_name LIKE '\_transient\_devdsame\_%' OR option_name LIKE '\_transient\_timeout\_devdsame\_%'");
 
-    wp_clear_scheduled_hook('devdsame_scheduled_scan');
-    wp_clear_scheduled_hook('devdsame_autodelete_sweep');
-    wp_clear_scheduled_hook('devdsame_summary_refresh');
-    wp_clear_scheduled_hook('devdsame_run_job');
-    wp_clear_scheduled_hook('devdsame_metrics_send');
+    // wp_unschedule_hook clears every event of the hook whatever its arguments.
+    foreach (array('devdsame_scheduled_scan', 'devdsame_autodelete_sweep', 'devdsame_summary_refresh', 'devdsame_run_job', 'devdsame_metrics_send') as $hook) {
+        if (function_exists('wp_unschedule_hook')) {
+            wp_unschedule_hook($hook);
+        } else {
+            wp_clear_scheduled_hook($hook);
+        }
+    }
 
-    // Remove the Recycle Bin directory ONLY if it is empty (never destroy un-restored files).
+    // Remove the Recycle Bin directory ONLY if it is empty (never destroy un-restored files),
+    // and never follow a link that points somewhere else.
     $up = wp_get_upload_dir();
     $trash = trailingslashit($up['basedir']) . 'devdome-safe-trash';
-    if (is_dir($trash)) {
+    if (is_dir($trash) && !is_link($trash)) {
         $entries = @scandir($trash);
-        $only_guards = true;
+        $only_guards = is_array($entries); // an unreadable folder is not an empty one
         if (is_array($entries)) {
             foreach ($entries as $e) {
                 if (in_array($e, array('.', '..', 'index.php', '.htaccess', 'web.config'), true)) {

@@ -44,6 +44,10 @@ function devdsame_collect_woocommerce(&$ids, &$haystack)
             $last,
             500
         ));
+        if ($wpdb->last_error !== '') {
+            devdsame_db_read_failed();
+            break;
+        }
         if (!$rows) {
             break;
         }
@@ -72,6 +76,10 @@ function devdsame_collect_woocommerce(&$ids, &$haystack)
              ORDER BY meta_id ASC LIMIT %d",
             array_merge($term_keys, array($last, 500))
         ));
+        if ($wpdb->last_error !== '') {
+            devdsame_db_read_failed();
+            break;
+        }
         if (!$rows) {
             break;
         }
@@ -106,11 +114,16 @@ function devdsame_collect_acf(&$ids, &$haystack)
         $rows = $wpdb->get_results($wpdb->prepare(
             "SELECT meta_id, meta_value FROM {$wpdb->postmeta}
              WHERE meta_value LIKE %s AND meta_id > %d
+               AND meta_key NOT IN ('_wp_attached_file', '_wp_attachment_metadata', '_wp_attachment_backup_sizes')
              ORDER BY meta_id ASC LIMIT %d",
             $wpdb->esc_like('a:') . '%',
             $last,
             800
         ));
+        if ($wpdb->last_error !== '') {
+            devdsame_db_read_failed();
+            break;
+        }
         if (!$rows) {
             break;
         }
@@ -125,7 +138,11 @@ function devdsame_collect_acf(&$ids, &$haystack)
                             $ids[$id] = true;
                         }
                     } elseif (is_string($val) && stripos($val, 'uploads') !== false) {
-                        $haystack .= "\n" . strtolower($val);
+                        if (strlen($haystack) + strlen(strtolower($val)) <= devdsame_haystack_cap()) {
+                            $haystack .= "\n" . strtolower($val);
+                        } else {
+                            $GLOBALS['devdsame_haystack_truncated'] = true;
+                        }
                     }
                 });
             }
@@ -158,6 +175,9 @@ function devdsame_collect_seo_social(&$ids, &$haystack)
         "SELECT meta_value FROM {$wpdb->postmeta} WHERE meta_key IN ($kph)",
         $keys
     ));
+    if ($wpdb->last_error !== '') {
+        devdsame_db_read_failed();
+    }
     if ($rows) {
         $present = true;
         foreach ($rows as $v) {
@@ -176,9 +196,16 @@ function devdsame_collect_seo_social(&$ids, &$haystack)
         "SELECT meta_value FROM {$wpdb->postmeta} WHERE meta_key IN ($uph) AND meta_value LIKE %s",
         array_merge($url_keys, array('%' . $wpdb->esc_like('uploads') . '%'))
     ));
+    if ($wpdb->last_error !== '') {
+        devdsame_db_read_failed();
+    }
     if ($urows) {
         foreach ($urows as $u) {
-            $haystack .= "\n" . strtolower((string) $u);
+            if (strlen($haystack) + strlen(strtolower((string) $u)) <= devdsame_haystack_cap()) {
+                            $haystack .= "\n" . strtolower((string) $u);
+                        } else {
+                            $GLOBALS['devdsame_haystack_truncated'] = true;
+                        }
         }
     }
 
@@ -189,6 +216,10 @@ function devdsame_collect_seo_social(&$ids, &$haystack)
         $ids[(int) $yoast['og_default_image_id']] = true;
     }
     if (is_array($yoast) && !empty($yoast['og_default_image'])) {
-        $haystack .= "\n" . strtolower((string) $yoast['og_default_image']);
+        if (strlen($haystack) + strlen(strtolower((string) $yoast['og_default_image'])) <= devdsame_haystack_cap()) {
+                            $haystack .= "\n" . strtolower((string) $yoast['og_default_image']);
+                        } else {
+                            $GLOBALS['devdsame_haystack_truncated'] = true;
+                        }
     }
 }

@@ -15,6 +15,12 @@ function devdsame_activate()
     $charset_collate = $wpdb->get_charset_collate();
     $p = $wpdb->prefix . 'devdsame_';
 
+    // Self-hosted builds: move legacy-prefix tables first. Activation runs after plugins_loaded,
+    // so without this the empty new tables would be created first and the rename skipped.
+    if (function_exists('devdsame_maybe_migrate')) {
+        devdsame_maybe_migrate();
+    }
+
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 
     // name/value settings store
@@ -174,6 +180,11 @@ function devdsame_activate()
     // Create + harden the Recycle Bin directory.
     devdsame_init_safe_trash();
 
+    // A cancel-rollback left pending at deactivation resumes now (nothing else drives ticks yet).
+    if (function_exists('devdsame_pending_rollback') && devdsame_pending_rollback() > 0) {
+        devdsame_schedule_tick(1);
+    }
+
     // Schedule the scheduled-scan dispatcher + the auto-delete sweep (both honour the
     // settings; if disabled they no-op). The queue runner is self-scheduling per job.
     if (!wp_next_scheduled('devdsame_scheduled_scan')) {
@@ -220,19 +231,23 @@ function devdsame_init_safe_trash()
  */
 function devdsame_harden_dir($dir)
 {
-    if (!is_dir($dir)) {
-        wp_mkdir_p($dir);
+    // Nothing is written before the folder is proven real: a linked folder (or one outside
+    // uploads) must not receive deny-all guards, they would lock whatever it points at.
+    clearstatcache();
+    if (is_link($dir) || !devdsame_mkdir_inside_uploads($dir)) {
+        return false;
     }
-    if (!is_dir($dir)) {
+    $index = $dir . '/index.php';
+    $htaccess = $dir . '/.htaccess';
+    $webconfig = $dir . '/web.config';
+    if (is_link($index) || is_link($htaccess) || is_link($webconfig)) {
         return false;
     }
 
-    $index = $dir . '/index.php';
     if (!file_exists($index)) {
         @file_put_contents($index, "<?php\n// Silence is golden.\n");
     }
 
-    $htaccess = $dir . '/.htaccess';
     if (!file_exists($htaccess)) {
         $rules = "Order allow,deny\nDeny from all\n"
             . "<IfModule mod_authz_core.c>\nRequire all denied\n</IfModule>\n"
@@ -240,7 +255,6 @@ function devdsame_harden_dir($dir)
         @file_put_contents($htaccess, $rules);
     }
 
-    $webconfig = $dir . '/web.config';
     if (!file_exists($webconfig)) {
         $xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<configuration>\n  <system.webServer>\n"
             . "    <authorization>\n      <deny users=\"*\" />\n    </authorization>\n"
@@ -248,5 +262,13 @@ function devdsame_harden_dir($dir)
         @file_put_contents($webconfig, $xml);
     }
 
-    return true;
+    // Hardened means all three guards exist with their deny rules in them (an empty or
+    // half-written guard protects nothing); a folder we could not guard is not used.
+    clearstatcache();
+    if (is_link($dir) || is_link($index) || is_link($htaccess) || is_link($webconfig)) {
+        return false;
+    }
+    $ht = is_file($htaccess) ? (string) file_get_contents($htaccess) : ''; // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- local guard file check.
+    $wc = is_file($webconfig) ? (string) file_get_contents($webconfig) : ''; // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- local guard file check.
+    return is_file($index) && strpos($ht, 'Deny from all') !== false && strpos($wc, '<deny users="*" />') !== false;
 }

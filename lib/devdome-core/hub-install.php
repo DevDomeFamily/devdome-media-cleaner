@@ -91,19 +91,20 @@ if (!function_exists('devdcorev1_hub_install_actions')) {
 /** Handle a one-click install request (WP.org repo only). */
 function devdcorev1_hub_handle_install()
 {
-    if (empty($_GET['devdcorev1_hub_install'])) {
+    if (empty($_GET['devdcorev1_hub_install']) || !is_string($_GET['devdcorev1_hub_install'])) {
         return;
     }
-    $slug    = sanitize_key(wp_unslash($_GET['devdcorev1_hub_install']));
+    $slug = sanitize_key(wp_unslash($_GET['devdcorev1_hub_install']));
+    // Nonce + capability FIRST: the catalog lookup below may fetch and cache remote data (wp.org review 2026-09-16).
+    check_admin_referer('devdcorev1_hub_install_' . $slug);
+    if (!devdcorev1_hub_can_install()) {
+        wp_die(esc_html('You do not have permission to install plugins.'));
+    }
     $catalog = function_exists('devdcorev1_hub_catalog') ? devdcorev1_hub_catalog() : array();
 
     // Allowlist = catalog keys (the hardcoded DevDome suite) AND the plugin must have a WP.org slug.
     if (!isset($catalog[$slug]) || empty($catalog[$slug]['wporg_slug'])) {
         wp_die(esc_html('Unknown plugin.'));
-    }
-    check_admin_referer('devdcorev1_hub_install_' . $slug);
-    if (!devdcorev1_hub_can_install()) {
-        wp_die(esc_html('You do not have permission to install plugins.'));
     }
 
     require_once ABSPATH . 'wp-admin/includes/plugin.php';
@@ -142,18 +143,18 @@ if (!function_exists('devdcorev1_hub_install_notice')) {
     /** Validated + escaped install-result banner for the Dashboard (or '' if none). Slug/name come from the allowlist, never raw input. */
     function devdcorev1_hub_install_notice()
     {
-        if (empty($_GET['ddinstall'])) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only display flag from a PRG redirect.
+        if (empty($_GET['ddinstall']) || !is_string($_GET['ddinstall'])) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only display flag from a PRG redirect.
             return '';
         }
         $res     = sanitize_key(wp_unslash($_GET['ddinstall'])); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only display flag, sanitized; slug/name resolved via the catalog allowlist.
-        $slug    = isset($_GET['ddslug']) ? sanitize_key(wp_unslash($_GET['ddslug'])) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only display flag, sanitized; only used as a catalog-allowlist key.
+        $slug    = isset($_GET['ddslug']) && is_string($_GET['ddslug']) ? sanitize_key(wp_unslash($_GET['ddslug'])) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only display flag, sanitized; only used as a catalog-allowlist key.
         $catalog = function_exists('devdcorev1_hub_catalog') ? devdcorev1_hub_catalog() : array();
         $name    = isset($catalog[$slug]['name']) ? (string) $catalog[$slug]['name'] : 'The plugin';
         if (strpos($name, 'DevDome') !== 0 && $name !== 'The plugin') {
             $name = 'DevDome ' . $name; // the same display name the plugin rows use
         }
 
-        if ($res === 'activated') {
+        if ($res === 'activated' || $res === 'active') {
             return '<div class="dd-hub-connect" data-ddnotice="1" style="border-color:#a7f3d0;background:#ecfdf5;"><span class="dashicons dashicons-yes-alt" style="color:#059669;"></span><div class="dd-hub-connect-body"><strong>' . esc_html($name) . ' is active.</strong></div></div>';
         }
         if ($res === 'installed') {

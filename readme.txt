@@ -1,22 +1,22 @@
-=== DevDome Media Cleaner – Remove Unused Images, Orphan Images & Duplicates ===
+=== DevDome Media Cleaner – Remove Unused Images & Orphan Images ===
 Contributors: devdome
-Tags: media cleaner, unused images, unused media, duplicate images, orphaned images
+Tags: media cleaner, unused images, unused media, orphaned images
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.10
+Stable tag: 1.1.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Image cleaner for WordPress. Find and delete unused images, orphan files, and duplicate media safely with Recycle Bin restore.
+Image cleaner for WordPress. Find and delete unused images and orphan files safely with Recycle Bin restore.
 
 == Description ==
 
 = WordPress Media Cleaner & Image Cleaner =
 
-DevDome Safe Media Cleaner is a WordPress media cleaner and image cleaner for finding and safely removing unused images, orphan files, duplicate images, and missing media from your Media Library and uploads folder.
+DevDome Safe Media Cleaner is a WordPress media cleaner and image cleaner for finding and safely removing unused images, orphan files, and missing media from your Media Library and uploads folder.
 
-Find unused images, review orphan images and files, detect duplicate media, and clean your WordPress Media Library without permanently deleting files immediately.
+Find unused images, review orphan images and files, and clean your WordPress Media Library without permanently deleting files immediately.
 
 Selected media moves to a protected Recycle Bin first, so you can check your site, restore cleaned files with one click, and permanently delete them only when you are ready.
 
@@ -36,14 +36,6 @@ Orphan files can accumulate after migrations, deleted plugins, failed uploads, m
 
 Review orphan media individually or in bulk and move unwanted files safely to the Recycle Bin.
 
-= Find Duplicate Images & Media =
-
-Detect exact duplicate files in your WordPress media library.
-
-The media cleaner groups duplicate images and helps you identify which copy to keep before cleaning the duplicates.
-
-Duplicate files are never deleted automatically.
-
 = Clean Your WordPress Media Library Safely =
 
 Media cleanup should not mean permanently deleting files without a way back.
@@ -59,7 +51,7 @@ DevDome Safe Media Cleaner uses several safeguards:
 = How Media Cleanup Works =
 
 1. **Scan:** Scan the WordPress Media Library and uploads folder in resumable background batches.
-2. **Review:** Search, filter, sort, and inspect unused images, orphan files, duplicates, and missing media.
+2. **Review:** Search, filter, sort, and inspect unused images, orphan files, and missing media.
 3. **Clean:** Move selected media to the protected Recycle Bin.
 4. **Restore or delete:** Restore files with one click or permanently delete them after checking your website.
 
@@ -131,7 +123,6 @@ The following features are free and unlimited:
 
 * Unused image scanning
 * Orphan file detection
-* Duplicate image detection
 * Missing media detection
 * Media review and reports
 * Recycle Bin
@@ -157,9 +148,9 @@ No media files, filenames, image URLs, or visitor data are sent.
 
 All scanning, classification, Recycle Bin, backup, and restore features run on your own server. The plugin connects to DevDome only after explicit opt-in.
 
-1. **DevDome account connection (`devdome.com` and `api.devdome.com`) - optional.**
+1. **DevDome account connection (`devdome.com`, `api.devdome.com` and `analytics.devdome.com`) - optional.**
 
-Connecting an account is required only for optional DevDome Monitoring. When you start the connection, `devdome.com` opens in your browser. After approval, the plugin stores your public DevDome Account ID and a site token, then sends the site token to `api.devdome.com` to verify the connection. The service returns the account email displayed in the plugin settings.
+Connecting an account is required only for optional DevDome Monitoring. When you start the connection, `devdome.com` opens in your browser. After approval, the plugin stores your public DevDome Account ID and a site token, then sends the site token to `api.devdome.com` to verify the connection; the connection handshake itself (start and claim) talks to `analytics.devdome.com`. The service returns the account email displayed in the plugin settings.
 
 The Account ID, site domain, and site token are transmitted. If you disconnect, the site domain and site token are sent once to unlink the site.
 
@@ -171,7 +162,7 @@ Privacy policy: https://devdome.com/privacy-policy
 
 2. **DevDome Monitoring (`api.devdome.com`) - optional and opt-in.**
 
-When Monitoring is enabled, the plugin sends aggregate scan statistics after each scan: site domain, site token, total media count and size, unused media count and size, orphaned file count, alert threshold, and selected email frequency.
+When Monitoring is enabled, the plugin sends aggregate scan statistics after each scan: site domain, site token, total media count and size, unused media count and size, orphaned file count, alert threshold, selected email frequency, and the link to this plugin's wp-admin screen.
 
 DevDome stores this history, displays it in the media-health dashboard, tracks changes across scans and connected sites, and sends alert emails when the chosen threshold is exceeded.
 
@@ -188,15 +179,21 @@ The bundled shared library references these endpoints, but they are disabled and
 * `https://api.devdome.com/plugin-updates/` - used by the self-hosted DevDome suite installer. Updates and installs for this build come only from WordPress.org.
 * `https://api.devdome.com/media-cleaner/metrics` - used by the DevDome-distributed build for aggregate product metrics. It does not run in the WordPress.org build.
 
-No outbound request is made unless you explicitly connect a DevDome account. Monitoring statistics are sent only after you also enable DevDome Monitoring.
+Beyond the plugin catalog fetch and the error reports described above, no outbound request is made unless you explicitly connect a DevDome account. Monitoring statistics are sent only after you also enable DevDome Monitoring.
+
+3. **Error reports (`devdome.com`) - only when you press Report this error.** The button on an error message sends the error text, the plugin, WordPress and PHP versions, the screen you were on, your site address and your admin email (so support can reply) to `https://devdome.com/api/plugin/error-report`. Nothing is sent unless you press it. Terms: https://devdome.com/terms-of-service Privacy: https://devdome.com/privacy-policy
 
 == Privacy ==
 
 * **Media files stay local.** Scanning, classification, cleanup, backup, and restore run on your server.
-* **Recycle Bin files stay local.** They are stored in `/wp-content/uploads/devdome-safe-trash/`, which is protected against public access during the review period.
+* **Recycle Bin files stay local.** They are stored in `/wp-content/uploads/devdome-safe-trash/`, protected against public access by the bundled .htaccess (Apache) and web.config (IIS) rules; on nginx add a deny rule for that folder yourself.
 * **No cookies** are set by the plugin.
 * **No product metrics** are sent by the WordPress.org build.
 * **Optional Monitoring** sends only the aggregate statistics listed in the External services section after explicit opt-in.
+
+= AI and Agent Support =
+
+On WordPress 6.9 and newer, DevDome Safe Media Cleaner registers WordPress Abilities covering the whole plugin: media health summary, scan results with every filter, filter options, job progress and control, scans (Media Library, disk, preview), one-click cleanup, moving chosen files to the Recycle Bin, batches and their files, restore, permanent delete, protect and ignore, backups (list, create, restore, delete), every setting and the error log. Compatible AI agents and MCP clients, for example through the official WordPress MCP Adapter, run the same code as the plugin screens under the same capability checks; irreversible actions need an explicit confirmation.
 
 == Installation ==
 
@@ -223,7 +220,7 @@ Unused images have a Media Library record but no detected reference on the site.
 
 = Does it find duplicate images? =
 
-Yes. The plugin detects exact duplicate files and suggests a copy to keep. Duplicates are never deleted automatically.
+Not in this version. An identical copy is listed like any other unused or orphan file. A duplicate view that groups copies and suggests which one to keep is planned.
 
 = How can I free up disk space? =
 
@@ -261,6 +258,10 @@ Yes. The disk scan walks wp-content/uploads and lists orphaned files: images wit
 
 Yes. Scans, cleanups, backups, and restores run on the server in background batches and continue after you close the tab. Reopen the plugin page to see the progress.
 
+= What happens to the Recycle Bin when I uninstall? =
+
+Restore or permanently delete every batch first. Uninstalling removes the plugin tables, so files still in the Recycle Bin folder can no longer be restored from the screen; the folder itself is left in place and the hidden attachments become visible again.
+
 == Screenshots ==
 
 1. Overview: view Media Library and Disk Storage cleanup opportunities, storage totals, and scan actions.
@@ -271,6 +272,10 @@ Yes. Scans, cleanups, backups, and restores run on the server in background batc
 6. Settings: configure scheduled scans, retention, protection rules, and optional DevDome Monitoring.
 
 == Changelog ==
+
+= 1.1.0 =
+* WordPress Abilities API: 22 abilities covering every feature (summary, scan results and filters, scans, cleanup, Recycle Bin batches, restore, permanent delete, protect, backups, settings, error log) for AI agents and MCP clients on WordPress 6.9 and newer.
+* Updates now work when the plugin folder belongs to another system user (shared DevDome core 1.7.4): folders installed from a root shell or by an AI agent no longer fail to update through the hub, the Plugins screen, bulk updates, uploads or automatic updates.
 
 = 1.0.10 =
 * Connect fix (shared DevDome core 1.6.6): the connect claim now waits up to 30 seconds and keeps the handshake for 20 minutes so a refresh retries it, the DevDome hub shows why a connect failed with a Try again link, and the verify file is served through a query form for hosts that answer /.well-known/ before WordPress.
@@ -285,21 +290,3 @@ Yes. Scans, cleanups, backups, and restores run on the server in background batc
 
 = 1.0.7 =
 * Bundled DevDome core updated to 1.6.2: the DevDome Dashboard shows the new Affiliate Manager logo.
-
-= 1.0.6 =
-* Scans, cleanups, backups and restores now keep running on the server after you leave the page or switch tabs. Before, a job on a quiet site could stall until you came back.
-* A restore or delete that cannot move any file (folder not writable) now stops with a clear message instead of running forever.
-* Bundled DevDome core updated to 1.6.1. Screenshots are no longer packed into the download (1.1 MB smaller).
-
-= 1.0.5 =
-* A site that has never been scanned now shows a dash instead of a perfect score, on the plugin page and in the DevDome Dashboard.
-* DevDome Monitoring settings now show a Connect button above the disabled toggle while no account is connected, instead of a dead checkbox.
-* Removed the legacy connect return flow; connecting uses the suite's one-click signed-in flow shared by every DevDome plugin.
-* The DevDome Dashboard (suite hub) was redesigned: cleaner cards, your account email and plan on the overview, and update buttons shown only when an update really exists.
-* One button system across the suite: the same Connect button and the same Save Settings button in every DevDome plugin.
-
-= 1.0.4 =
-* Unified DevDome suite icons and updated the suite hub with one-click installs for WordPress.org plugins.
-
-= 1.0.3 =
-* Initial WordPress.org release.

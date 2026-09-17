@@ -65,6 +65,9 @@ function devdsame_scan_chunk($scan_id, $after_id, $limit)
         $limit
     ));
 
+    if ($wpdb->last_error !== '') {
+        return array('processed' => 0, 'last_id' => (int) $after_id, 'done' => true, 'error' => __('The Media Library could not be read from the database.', 'devdome-safe-media-cleaner'));
+    }
     if (!$rows) {
         return array('processed' => 0, 'last_id' => (int) $after_id, 'done' => true);
     }
@@ -78,6 +81,14 @@ function devdsame_scan_chunk($scan_id, $after_id, $limit)
     $never_folders = devdsame_get_array('never_scan_folders');
     $protected_ids = devdsame_protected_ids();
     $ignored_ids = devdsame_ignored_ids();
+    if ($protected_ids === null || $ignored_ids === null) {
+        // Without the protection list a protected image could be auto-selected: stop the scan.
+        return array('processed' => 0, 'last_id' => (int) $after_id, 'done' => true, 'error' => __('The protected media list could not be read from the database.', 'devdome-safe-media-cleaner'));
+    }
+    if (!empty($GLOBALS['devdsame_db_failed']) && empty($set['truncated'])) {
+        // A settings read failed after the reference set was built: protections may be unset.
+        return array('processed' => 0, 'last_id' => (int) $after_id, 'done' => true, 'error' => __('The plugin settings could not be read from the database.', 'devdome-safe-media-cleaner'));
+    }
     $builder_unreadable = function_exists('devdsame_has_unreadable_builder_data') ? devdsame_has_unreadable_builder_data() : false;
     // If the URL/path haystack was capped for memory, we cannot prove a URL-only reference is
     // absent, so non-ID-referenced items are downgraded to Uncertain (never auto-selected).
@@ -257,13 +268,20 @@ function devdsame_scan_chunk($scan_id, $after_id, $limit)
             'is_selected'      => $is_selected,
             'created_at'       => $now,
         ), array('%d', '%d', '%s', '%s', '%s', '%d', '%d', '%d', '%s', '%s', '%s', '%d', '%s', '%d', '%d', '%s'));
+        if ($wpdb->last_error !== '') {
+            // A row that did not land would vanish from every count: stop the scan instead.
+            return array('processed' => $processed, 'last_id' => $last_id, 'done' => true, 'error' => __('A scan result could not be saved (database write failed).', 'devdome-safe-media-cleaner'));
+        }
 
         // Memory guard: drop the cached attachment metadata for this ID.
         clean_post_cache($attach_id);
     }
 
-    // Roll the chunk's accumulators into the scan row.
-    devdsame_accumulate_scan($scan_id, count($rows), $acc);
+    // Roll the chunk's accumulators into the scan row. The score and the summary read these
+    // totals straight from the row, so a lost write would make a completed scan lie: stop instead.
+    if (!devdsame_accumulate_scan($scan_id, count($rows), $acc)) {
+        return array('processed' => $processed, 'last_id' => $last_id, 'done' => true, 'error' => __('The scan totals could not be saved (database write failed).', 'devdome-safe-media-cleaner'));
+    }
 
     unset($rows);
     if (function_exists('gc_collect_cycles') && ($processed % 1000) === 0) {
@@ -288,13 +306,13 @@ function devdsame_compute_confidence($post_row, $upload_ts, $recent_cut)
     return max(0, min(100, $score));
 }
 
-/** Add a chunk's counts to the scan row (atomic increments). */
+/** Add a chunk's counts to the scan row (atomic increments). False when the write failed. */
 function devdsame_accumulate_scan($scan_id, $attachments, $acc)
 {
     global $wpdb;
     $t = $wpdb->prefix . 'devdsame_scans';
     // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal scans table atomic increment; all values bound via prepare.
-    $wpdb->query($wpdb->prepare(
+    $ok = $wpdb->query($wpdb->prepare(
         "UPDATE {$t} SET
             total_attachments = total_attachments + %d,
             total_files = total_files + %d,
@@ -315,6 +333,7 @@ function devdsame_accumulate_scan($scan_id, $attachments, $acc)
         (int) $acc['bytes_total'],
         (int) $scan_id
     ));
+    return $ok !== false && $wpdb->last_error === '';
 }
 
 /** Count of image attachments to scan (for progress/ETA). */
@@ -326,6 +345,19 @@ function devdsame_total_attachments()
 }
 
 /** Finalize a scan: duplicate pass, score, cached summary, cleanup. */
+/** Mark a scan failed with a reason and record it. Returns false so callers can pass it on. */
+function devdsame_fail_scan($scan_id, $message)
+{
+    global $wpdb;
+    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal scans table status update.
+    $wpdb->update($wpdb->prefix . 'devdsame_scans', array('status' => 'failed', 'finished_at' => current_time('mysql'), 'error_message' => (string) $message), array('id' => (int) $scan_id), array('%s', '%s', '%s'), array('%d'));
+    devdsame_flush_used_set();
+    if (function_exists('devdsame_record_error')) {
+        devdsame_record_error('scan_failed', (string) $message, array('scan_id' => (int) $scan_id));
+    }
+    return false;
+}
+
 function devdsame_finalize_scan($scan_id)
 {
     global $wpdb;
@@ -347,6 +379,9 @@ function devdsame_finalize_scan($scan_id)
         "SELECT status, COUNT(*) AS n FROM {$items} WHERE scan_id = %d GROUP BY status",
         $scan_id
     ));
+    if ($wpdb->last_error !== '') {
+        return devdsame_fail_scan($scan_id, __('The scan results could not be counted (database read failed).', 'devdome-safe-media-cleaner'));
+    }
     $counts = array('used' => 0, 'unused' => 0, 'uncertain' => 0, 'missing' => 0, 'duplicate' => 0, 'orphan' => 0);
     foreach ((array) $by_status as $row) {
         $st = (string) $row->status;
@@ -360,13 +395,17 @@ function devdsame_finalize_scan($scan_id)
     // auto-selected and missing has no bytes on disk.) This is what makes the headline number
     // match the tiles: 987 duplicates + orphans can never show "0 B possible cleanup" again.
     // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal scan_items aggregate; scan_id bound via prepare.
-    $cleanup_bytes = (int) $wpdb->get_var($wpdb->prepare(
+    $cleanup_bytes = $wpdb->get_var($wpdb->prepare(
         "SELECT COALESCE(SUM(file_size), 0) FROM {$items} WHERE scan_id = %d AND status IN ('unused', 'duplicate', 'orphan')",
         $scan_id
     ));
+    if ($cleanup_bytes === null || $wpdb->last_error !== '') {
+        return devdsame_fail_scan($scan_id, __('The scan results could not be totalled (database read failed).', 'devdome-safe-media-cleaner'));
+    }
+    $cleanup_bytes = (int) $cleanup_bytes;
 
     // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal scans table update.
-    $wpdb->update($scans, array(
+    $written = $wpdb->update($scans, array(
         'status'                 => 'completed',
         'finished_at'            => current_time('mysql'),
         'used_count'             => $counts['used'],
@@ -377,6 +416,9 @@ function devdsame_finalize_scan($scan_id)
         'orphan_count'           => $counts['orphan'],
         'possible_cleanup_bytes' => $cleanup_bytes,
     ), array('id' => $scan_id), array('%s', '%s', '%d', '%d', '%d', '%d', '%d', '%d', '%d'), array('%d'));
+    if ($written === false) {
+        return devdsame_fail_scan($scan_id, __('The scan could not be marked completed (database write failed).', 'devdome-safe-media-cleaner'));
+    }
 
     devdsame_flush_used_set();
 
@@ -389,6 +431,9 @@ function devdsame_finalize_scan($scan_id)
 
     // Score + cached summary.
     $score = devdsame_compute_score($scan_id);
+    if ($score === null) {
+        return devdsame_fail_scan($scan_id, __('The scan score could not be read (database read failed).', 'devdome-safe-media-cleaner'));
+    }
     if (function_exists('devdsame_refresh_summary')) {
         devdsame_refresh_summary($scan_id, $score);
     }
@@ -405,12 +450,18 @@ function devdsame_compute_score($scan_id)
     $scans = $wpdb->prefix . 'devdsame_scans';
     // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal scans row read; scan_id bound via prepare.
     $row = $wpdb->get_row($wpdb->prepare("SELECT possible_cleanup_bytes, total_library_bytes, unused_count, total_attachments FROM {$scans} WHERE id=%d", $scan_id));
+    if ($wpdb->last_error !== '') {
+        return null; // a failed read is not a perfect score
+    }
     if (!$row) {
         return 100;
     }
     $total = (int) $row->total_library_bytes;
     $bloat = (int) $row->possible_cleanup_bytes;
     if ($total <= 0) {
+        if ($bloat > 0) {
+            return 0; // nothing in the library, yet cleanup bytes (orphans) exist: not a clean site
+        }
         // Fall back to count-based when byte totals are unavailable.
         $ta = max(1, (int) $row->total_attachments);
         return (int) round(100 * (1 - min(1, (int) $row->unused_count / $ta)));
@@ -426,6 +477,9 @@ function devdsame_protected_ids()
     $t = $wpdb->prefix . 'devdsame_protected';
     // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal protected table read.
     $ids = $wpdb->get_col($wpdb->prepare("SELECT attachment_id FROM {$t} WHERE mode = %s", 'protect'));
+    if ($wpdb->last_error !== '') {
+        return null; // unknown, never "nothing is protected"
+    }
     $out = array();
     foreach ((array) $ids as $id) {
         $out[(int) $id] = true;
@@ -440,6 +494,9 @@ function devdsame_ignored_ids()
     $t = $wpdb->prefix . 'devdsame_protected';
     // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal protected table read.
     $ids = $wpdb->get_col($wpdb->prepare("SELECT attachment_id FROM {$t} WHERE mode = %s", 'ignore'));
+    if ($wpdb->last_error !== '') {
+        return null; // unknown, never "nothing is ignored"
+    }
     $out = array();
     foreach ((array) $ids as $id) {
         $out[(int) $id] = true;
@@ -454,7 +511,7 @@ function devdsame_set_protected($attachment_id, $mode = 'protect')
     $t = $wpdb->prefix . 'devdsame_protected';
     $mode = $mode === 'ignore' ? 'ignore' : 'protect';
     // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal protected table upsert; values bound via prepare.
-    $wpdb->query($wpdb->prepare(
+    $r = $wpdb->query($wpdb->prepare(
         "INSERT INTO {$t} (attachment_id, mode, created_at, user_id) VALUES (%d, %s, %s, %d)
          ON DUPLICATE KEY UPDATE mode = VALUES(mode)",
         (int) $attachment_id,
@@ -462,6 +519,7 @@ function devdsame_set_protected($attachment_id, $mode = 'protect')
         current_time('mysql'),
         get_current_user_id()
     ));
+    return $r !== false; // 0 rows = the mark was already set, still true
 }
 
 /** Remove an attachment from the protect/ignore list. */
@@ -470,7 +528,7 @@ function devdsame_unset_protected($attachment_id)
     global $wpdb;
     $t = $wpdb->prefix . 'devdsame_protected';
     // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal protected table delete.
-    $wpdb->delete($t, array('attachment_id' => (int) $attachment_id), array('%d'));
+    return $wpdb->delete($t, array('attachment_id' => (int) $attachment_id), array('%d')) !== false;
 }
 
 /**

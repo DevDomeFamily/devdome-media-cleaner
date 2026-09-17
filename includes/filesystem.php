@@ -34,12 +34,21 @@ function devdsame_scan_filesystem($scan_id, $max_files = 5000, $offset = 0)
 {
     $basedir = devdsame_uploads_basedir();
     if (!is_dir($basedir) || !is_readable($basedir)) {
-        return array('orphans' => 0, 'scanned' => 0, 'bytes' => 0, 'offset' => (int) $offset, 'done' => true);
+        // Not "no orphans": the folder could not be read at all.
+        return array('orphans' => 0, 'scanned' => 0, 'bytes' => 0, 'offset' => (int) $offset, 'done' => true, 'error' => __('The uploads folder could not be read.', 'devdome-safe-media-cleaner'));
     }
 
     $known = devdsame_known_attachment_files();
+    if ($known === null) {
+        // A partial list of known files would make real library files look like orphans.
+        return array('orphans' => 0, 'scanned' => 0, 'bytes' => 0, 'offset' => (int) $offset, 'done' => true, 'error' => __('The list of Media Library files could not be read from the database.', 'devdome-safe-media-cleaner'));
+    }
     $trash_real = realpath(devdsame_safe_trash_dir());
     $trash_real = $trash_real ? str_replace('\\', '/', $trash_real) : '';
+    $never_folders = array();
+    foreach (devdsame_get_array('never_scan_folders') as $nf) {
+        $never_folders[] = strtolower(trim((string) $nf, '/'));
+    }
 
     global $wpdb;
     $items_table = $wpdb->prefix . 'devdsame_scan_items';
@@ -56,7 +65,7 @@ function devdsame_scan_filesystem($scan_id, $max_files = 5000, $offset = 0)
         $norm = str_replace('\\', '/', $abs);
 
         // Never descend into / flag the Recycle Bin folder.
-        if ($trash_real !== '' && strpos($norm, $trash_real) === 0) {
+        if ($trash_real !== '' && ($norm === $trash_real || strpos($norm, $trash_real . '/') === 0)) {
             continue;
         }
         // Skip our own protective files.
@@ -77,6 +86,17 @@ function devdsame_scan_filesystem($scan_id, $max_files = 5000, $offset = 0)
         $rel_probe = devdsame_path_to_relative($abs);
         $first_seg = strtolower((string) strtok((string) $rel_probe, '/'));
         if (in_array($first_seg, devdsame_orphan_skip_folders(), true)) {
+            continue;
+        }
+        // The user's own "never scan" folders apply to the disk pass too.
+        $skip_user = false;
+        foreach ($never_folders as $nf) {
+            if ($nf !== '' && ($first_seg === $nf || strpos(strtolower((string) $rel_probe), $nf . '/') === 0)) {
+                $skip_user = true;
+                break;
+            }
+        }
+        if ($skip_user) {
             continue;
         }
 
@@ -141,6 +161,9 @@ function devdsame_scan_filesystem($scan_id, $max_files = 5000, $offset = 0)
             'is_selected'      => 0,
             'created_at'       => $now,
         ), array('%d', '%d', '%s', '%s', '%s', '%d', '%d', '%d', '%s', '%s', '%s', '%d', '%s', '%d', '%d', '%s'));
+        if ($wpdb->last_error !== '') {
+            return array('orphans' => $orphans, 'scanned' => $scanned, 'bytes' => $bytes, 'offset' => $offset + $scanned, 'done' => true, 'error' => __('An orphan file could not be recorded (database write failed).', 'devdome-safe-media-cleaner'));
+        }
         $orphans++;
     }
 
@@ -207,6 +230,10 @@ function devdsame_known_attachment_files()
             $last,
             500
         ));
+        if ($wpdb->last_error !== '') {
+            devdsame_db_read_failed();
+            return null;
+        }
         if (!$ids) {
             break;
         }

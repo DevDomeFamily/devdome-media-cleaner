@@ -52,10 +52,16 @@ function devdsame_enqueue_assets($hook)
             'pausing'       => __('Pausing after the current batch...', 'devdome-safe-media-cleaner'),
             'noResults'     => __('No media matched this filter.', 'devdome-safe-media-cleaner'),
             'confirmTrash'  => __('Move the selected images to Recycle Bin? Nothing is permanently deleted, you can restore anytime.', 'devdome-safe-media-cleaner'),
+            /* translators: %d: number of selected images */
+            'confirmTrashCount' => __('%d selected images will move (including any selected on other pages or under other filters).', 'devdome-safe-media-cleaner'),
+            'orphanNoProtect' => __('Protect and Ignore apply to Media Library images; orphan files have no library record.', 'devdome-safe-media-cleaner'),
+            'selectFirst'   => __('Select images first.', 'devdome-safe-media-cleaner'),
+            'loadFailed'    => __('The review list could not be loaded. Nothing was changed; reload the page to try again.', 'devdome-safe-media-cleaner'),
             'confirmDelete' => __('Permanently delete this batch? This cannot be undone.', 'devdome-safe-media-cleaner'),
             'confirmRestore' => __('Restore every file in this batch to its original location?', 'devdome-safe-media-cleaner'),
             'confirmDeleteBackup' => __('Delete this backup file? This cannot be undone.', 'devdome-safe-media-cleaner'),
-            'confirmRestoreBackup' => __('Restore every file in this backup? Existing files with the same name are overwritten.', 'devdome-safe-media-cleaner'),
+            'confirmRestoreBackup' => __('Restore this backup? Files missing from the uploads folder are written back; files that exist now are kept untouched.', 'devdome-safe-media-cleaner'),
+            'backupDeleteFailed' => __('The backup could not be deleted. It is still listed.', 'devdome-safe-media-cleaner'),
             'confirmClearHistory' => __('Clear the batch list? Everything with nothing left to restore is removed. Batches that still hold restorable files are kept.', 'devdome-safe-media-cleaner'),
             'added' => __('Added', 'devdome-safe-media-cleaner'),
             'selectedLbl' => __('selected', 'devdome-safe-media-cleaner'),
@@ -263,68 +269,62 @@ function devdsame_handle_settings_save()
     }
     check_admin_referer('devdsame_settings', '_mcsn');
 
+    // No write after a failed read: the form may have been rendered from defaults.
+    unset($GLOBALS['devdsame_cache'], $GLOBALS['devdsame_db_failed']);
+    devdsame_get_setting('recent_upload_protection_days');
+    if (!empty($GLOBALS['devdsame_db_failed'])) {
+        wp_safe_redirect(add_query_arg(array('page' => DEVDSAME_PAGE, 'mc_tab' => 'settings', 'mc_err' => 'settings'), admin_url('admin.php')));
+        exit;
+    }
+
+    $writes = array();
     $recent = isset($_POST['mc_recent_days']) ? (int) $_POST['mc_recent_days'] : 30;
-    devdsame_update_setting('recent_upload_protection_days', max(1, min(999, $recent)));
+    $writes['recent_upload_protection_days'] = max(1, min(999, $recent));
 
     // Scheduled scan: on/off + writable "every N days".
     $sched_on = !empty($_POST['mc_scheduled_scan_on']);
     $sched_days = isset($_POST['mc_scheduled_scan_days']) ? (int) $_POST['mc_scheduled_scan_days'] : 7;
-    devdsame_update_setting('scheduled_scan_days', $sched_on ? max(1, min(999, $sched_days)) : 0);
-    devdsame_update_setting('scheduled_scan', $sched_on ? 'custom' : 'off');
+    $writes['scheduled_scan_days'] = $sched_on ? max(1, min(999, $sched_days)) : 0;
+    $writes['scheduled_scan'] = $sched_on ? 'custom' : 'off';
 
     $auto = isset($_POST['mc_auto_delete_days']) ? (int) $_POST['mc_auto_delete_days'] : 0;
-    devdsame_update_setting('auto_delete_after_days', in_array($auto, array(0, 7, 14, 30), true) ? $auto : 0);
+    $writes['auto_delete_after_days'] = in_array($auto, array(0, 7, 14, 30), true) ? $auto : 0;
 
     $threshold = isset($_POST['mc_confidence_threshold']) ? (int) $_POST['mc_confidence_threshold'] : 75;
-    devdsame_update_setting('confidence_threshold', max(0, min(100, $threshold)));
+    $writes['confidence_threshold'] = max(0, min(100, $threshold));
 
-    devdsame_update_setting('protect_recent', empty($_POST['mc_protect_recent']) ? 0 : 1);
-    devdsame_update_setting('protect_woocommerce', empty($_POST['mc_protect_woocommerce']) ? 0 : 1);
-    devdsame_update_setting('protect_theme_assets', empty($_POST['mc_protect_theme_assets']) ? 0 : 1);
+    $writes['protect_recent'] = empty($_POST['mc_protect_recent']) ? 0 : 1;
+    $writes['protect_woocommerce'] = empty($_POST['mc_protect_woocommerce']) ? 0 : 1;
+    $writes['protect_theme_assets'] = empty($_POST['mc_protect_theme_assets']) ? 0 : 1;
 
-    // Duplicate methods (allowlisted).
     // CDN mappings: one "from base url" per line.
     $cdn_raw = isset($_POST['mc_cdn_mappings']) ? sanitize_textarea_field(wp_unslash($_POST['mc_cdn_mappings'])) : '';
-    $cdn = array();
-    foreach (preg_split('/\r\n|\r|\n/', $cdn_raw) as $line) {
-        $line = trim($line);
-        if ($line !== '') {
-            $url = esc_url_raw($line);
-            if ($url !== '') {
-                $cdn[untrailingslashit($url)] = '';
-            }
-        }
-    }
-    devdsame_update_setting('cdn_mappings', $cdn);
+    $writes['cdn_mappings'] = devdsame_sanitize_cdn_list(preg_split('/\r\n|\r|\n/', $cdn_raw));
 
     // Never-scan folders: one relative path per line.
     $nf_raw = isset($_POST['mc_never_scan_folders']) ? sanitize_textarea_field(wp_unslash($_POST['mc_never_scan_folders'])) : '';
-    $nf = array();
-    foreach (preg_split('/\r\n|\r|\n/', $nf_raw) as $line) {
-        $line = trim($line, " \t/");
-        if ($line !== '') {
-            // Strip traversal + leading slashes; keep simple relative folder.
-            $line = str_replace('..', '', $line);
-            $nf[] = sanitize_text_field($line);
-        }
-    }
-    devdsame_update_setting('never_scan_folders', array_values(array_unique($nf)));
+    $writes['never_scan_folders'] = devdsame_sanitize_folder_list(preg_split('/\r\n|\r|\n/', $nf_raw));
 
     // Email notifications: alerts always go to the DevDome ACCOUNT email, so the toggle only
     // arms when the site is connected (the checkbox is frozen in the UI otherwise).
     $notif_on = !empty($_POST['mc_email_notifications_on']) && '' !== devdsame_connected_account_id();
-    devdsame_update_setting('email_notifications', $notif_on ? 1 : 0);
+    $writes['email_notifications'] = $notif_on ? 1 : 0;
 
     $notif_freq = isset($_POST['mc_notification_frequency_days']) ? (int) $_POST['mc_notification_frequency_days'] : 7;
-    devdsame_update_setting('notification_frequency_days', in_array($notif_freq, array(1, 3, 7, 14, 30), true) ? $notif_freq : 7);
+    $writes['notification_frequency_days'] = in_array($notif_freq, array(1, 3, 7, 14, 30), true) ? $notif_freq : 7;
 
     $growth_on = !empty($_POST['mc_growth_alert_on']);
     $growth = isset($_POST['mc_unused_growth_alert_mb']) ? (float) $_POST['mc_unused_growth_alert_mb'] : 0;
-    devdsame_update_setting('unused_growth_alert', ($growth_on && $growth > 0) ? (int) round($growth * 1048576) : 0);
+    $growth = max(0, min(1048576, $growth)); // MB; 1 TB cap keeps the byte value sane
+    $writes['unused_growth_alert'] = ($growth_on && $growth > 0) ? (int) round($growth * 1048576) : 0;
 
-    wp_safe_redirect(add_query_arg(array('page' => DEVDSAME_PAGE, 'mc_tab' => 'settings', 'mc_saved' => '1'), admin_url('admin.php')));
+    // "Saved" only when every value is in the store afterwards (a failed write is reported, not hidden).
+    $failed = devdsame_write_settings($writes);
+    $flag = $failed ? array('mc_err' => 'settings') : array('mc_saved' => '1');
+    wp_safe_redirect(add_query_arg(array_merge(array('page' => DEVDSAME_PAGE, 'mc_tab' => 'settings'), $flag), admin_url('admin.php')));
     exit;
 }
+
 add_action('admin_init', 'devdsame_handle_settings_save');
 
 /** Restore a batch (non-JS fallback, nonce + cap, PRG). */
@@ -335,11 +335,11 @@ function devdsame_handle_restore()
     }
     check_admin_referer('devdsame_restore', '_mcrn');
     $batch = (int) $_POST['devdsame_restore_batch'];
-    if ($batch) {
-        devdsame_restore_batch($batch);
-        devdsame_refresh_summary();
-    }
-    wp_safe_redirect(add_query_arg(array('page' => DEVDSAME_PAGE, 'mc_tab' => 'trash', 'mc_restored' => '1'), admin_url('admin.php')));
+    $res = $batch ? devdsame_restore_batch($batch) : array('restored' => 0, 'errors' => 1);
+    devdsame_refresh_summary();
+    // "Restored" only when every file came back; anything else is reported as a problem.
+    $flag = ($res['errors'] === 0 && $res['restored'] > 0) ? array('mc_restored' => '1') : array('mc_err' => 'restore');
+    wp_safe_redirect(add_query_arg(array_merge(array('page' => DEVDSAME_PAGE, 'mc_tab' => 'trash'), $flag), admin_url('admin.php')));
     exit;
 }
 add_action('admin_init', 'devdsame_handle_restore');
@@ -352,11 +352,10 @@ function devdsame_handle_delete()
     }
     check_admin_referer('devdsame_delete', '_mcdn');
     $batch = (int) $_POST['devdsame_delete_batch'];
-    if ($batch) {
-        devdsame_permanent_delete_batch($batch);
-        devdsame_refresh_summary();
-    }
-    wp_safe_redirect(add_query_arg(array('page' => DEVDSAME_PAGE, 'mc_tab' => 'trash', 'mc_deleted' => '1'), admin_url('admin.php')));
+    $res = $batch ? devdsame_permanent_delete_batch($batch) : array('deleted' => 0, 'errors' => 1);
+    devdsame_refresh_summary();
+    $flag = ($res['errors'] === 0 && $res['deleted'] > 0) ? array('mc_deleted' => '1') : array('mc_err' => 'delete');
+    wp_safe_redirect(add_query_arg(array_merge(array('page' => DEVDSAME_PAGE, 'mc_tab' => 'trash'), $flag), admin_url('admin.php')));
     exit;
 }
 add_action('admin_init', 'devdsame_handle_delete');
@@ -479,6 +478,9 @@ function devdsame_render_dashboard_tab($s)
     <div class="max-w-5xl px-6 py-6">
         <?php if ($saved) : ?>
             <div class="dd-banner dd-banner-ok dd-flash" style="margin-bottom:16px;"><?php esc_html_e('Settings saved.', 'devdome-safe-media-cleaner'); ?></div>
+        <?php endif; ?>
+        <?php if (isset($_GET['mc_err']) && $_GET['mc_err'] === 'settings') : // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only display flag from a PRG redirect. ?>
+            <div class="dd-banner dd-banner-error dd-flash" style="margin-bottom:16px;"><?php esc_html_e('Some settings could not be saved (database write failed). The values shown are what is stored now; try again.', 'devdome-safe-media-cleaner'); ?></div>
         <?php endif; ?>
 
         <?php
@@ -721,7 +723,7 @@ function devdsame_render_review_tab($s)
             // Land on the first bucket that actually has content — opening "Review" onto an
             // empty Unused list when there are 900 duplicates reads as broken.
             $default_status = 'unused';
-            foreach (array('unused' => 'unused_count', 'orphan' => 'orphan_count', 'uncertain' => 'uncertain_count') as $st => $key) {
+            foreach (array('unused' => 'unused_count', 'orphan' => 'orphan_count', 'uncertain' => 'uncertain_count', 'missing' => 'missing_count') as $st => $key) {
                 if ((int) $s[$key] > 0) {
                     $default_status = $st;
                     break;
@@ -833,10 +835,20 @@ function devdsame_render_trash_tab($s)
     $tb = $wpdb->prefix . 'devdsame_trash_batches';
     // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal trash_batches list for admin display; literal LIMIT.
     $batches = $wpdb->get_results("SELECT * FROM {$tb} ORDER BY id DESC LIMIT 100");
+    // A failed read must not look like an empty bin (the batches are still there and restorable).
+    $bin_read_failed = ($batches === null || $wpdb->last_error !== '');
     $ti = $wpdb->prefix . 'devdsame_trash_items';
     // Source per batch: any attachment-backed item = Media Library wipe, else Disk wipe.
     // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal aggregate for admin display.
     $batch_src = $wpdb->get_results("SELECT batch_id, MAX(attachment_id > 0) AS is_lib FROM {$ti} GROUP BY batch_id", OBJECT_K);
+    if ($batch_src === null || $wpdb->last_error !== '') {
+        $bin_read_failed = true;
+    }
+    // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal count for the list cap note.
+    $batch_total = $bin_read_failed ? 0 : (int) $wpdb->get_var("SELECT COUNT(*) FROM {$tb}");
+    if ($wpdb->last_error !== '') {
+        $bin_read_failed = true;
+    }
     $restored = isset($_GET['mc_restored']); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only display flag from a PRG redirect.
     $deleted = isset($_GET['mc_deleted']); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only display flag from a PRG redirect.
     ?>
@@ -847,6 +859,9 @@ function devdsame_render_trash_tab($s)
         <?php if ($deleted) : ?>
             <div class="dd-banner dd-banner-error dd-flash" style="margin-bottom:16px;"><?php esc_html_e('Batch permanently deleted.', 'devdome-safe-media-cleaner'); ?></div>
         <?php endif; ?>
+        <?php if (isset($_GET['mc_err']) && in_array($_GET['mc_err'], array('restore', 'delete'), true)) : // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only display flag from a PRG redirect. ?>
+            <div class="dd-banner dd-banner-error dd-flash" style="margin-bottom:16px;"><?php echo esc_html($_GET['mc_err'] === 'restore' ? __('Not every file could be restored. The batch stays in the Recycle Bin; the error log on the Overview tab lists the files.', 'devdome-safe-media-cleaner') : __('Not every file could be deleted. The batch stays in the Recycle Bin; the error log on the Overview tab lists the files.', 'devdome-safe-media-cleaner')); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- compared against a fixed allowlist above. ?></div>
+        <?php endif; ?>
 
         <div class="dd-card">
             <div class="dd-sec-head"><span class="dashicons dashicons-trash dd-ico"></span><h2 class="dd-h2"><?php esc_html_e('Recycle Bin batches', 'devdome-safe-media-cleaner'); ?></h2>
@@ -854,9 +869,14 @@ function devdsame_render_trash_tab($s)
             </div>
             <p style="color:#6b7280;margin:0 0 12px;"><?php esc_html_e('Files moved here are not deleted. Review your site for a few days, then restore or permanently delete each batch.', 'devdome-safe-media-cleaner'); ?></p>
 
-            <?php if (!$batches) : ?>
+            <?php if ($bin_read_failed) : ?>
+                <div class="dd-banner dd-banner-error" style="margin-bottom:12px;"><?php esc_html_e('The Recycle Bin list could not be read (database error). Nothing was changed; reload the page to try again.', 'devdome-safe-media-cleaner'); ?></div>
+            <?php elseif (!$batches) : ?>
                 <div class="dd-empty"><?php esc_html_e('No Recycle Bin batches yet.', 'devdome-safe-media-cleaner'); ?></div>
             <?php else : ?>
+                <?php if ($batch_total > count($batches)) : ?>
+                    <p style="color:#6b7280;margin:0 0 8px;"><?php echo esc_html(sprintf(/* translators: 1: shown count, 2: total count */ __('Showing the newest %1$d of %2$d batches. Older batches are listed by WP-CLI (wp devdome media) and the list-trash-batches ability.', 'devdome-safe-media-cleaner'), count($batches), $batch_total)); ?></p>
+                <?php endif; ?>
                 <table class="mc-bk-table">
                     <thead>
                         <tr>
@@ -975,6 +995,11 @@ function devdsame_render_backup_tab()
 {
     $backups = function_exists('devdsame_backups') ? devdsame_backups() : array();
     $notice = isset($_GET['mc_bk']) ? sanitize_key(wp_unslash($_GET['mc_bk'])) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only display flag from a PRG redirect, sanitized.
+    if (!empty($GLOBALS['devdsame_db_failed'])) {
+        // A failed read is not "No backups yet": the archives are still there.
+        echo '<div class="max-w-5xl px-6 py-6"><div class="dd-banner dd-banner-error">' . esc_html__('The backup list could not be read (database error). Nothing was changed; reload the page to try again.', 'devdome-safe-media-cleaner') . '</div></div>';
+        return;
+    }
     ?>
     <div class="max-w-5xl px-6 py-6">
         <?php if ($notice === 'deleted') : ?>
@@ -987,7 +1012,7 @@ function devdsame_render_backup_tab()
 
         <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:10px;padding:12px 16px;margin:0 0 16px;font-size:13px;line-height:1.6;color:#3730a3;">
             <strong><?php esc_html_e('How backups work:', 'devdome-safe-media-cleaner'); ?></strong>
-            <?php esc_html_e('every backup is a full ZIP snapshot of your images, saved on this server in /uploads/devdome-smc-backups. Create one from the Overview tab before you clean anything. Restore puts every file back exactly where it was.', 'devdome-safe-media-cleaner'); ?>
+            <?php esc_html_e('every backup is a full ZIP snapshot of your images, saved on this server in /uploads/devdome-smc-backups. Create one from the Overview tab before you clean anything. Restore writes missing files back to their original locations; files that exist now are kept untouched.', 'devdome-safe-media-cleaner'); ?>
         </div>
 
         <?php
@@ -1014,6 +1039,17 @@ function devdsame_render_settings_tab()
     $nf = devdsame_get_array('never_scan_folders');
     $growth_b = devdsame_get_int('unused_growth_alert', 0);
     $growth_mb = $growth_b > 0 ? round($growth_b / 1048576) : 500;
+    if (!empty($GLOBALS['devdsame_db_failed'])) {
+        // Defaults are not the settings: a form filled with blanks would wipe the CDN and never-scan lists on save.
+        echo '<div class="max-w-5xl px-6 py-6"><div class="dd-banner dd-banner-error">' . esc_html__('The settings could not be read (database error). Nothing is shown or changed; reload the page to try again.', 'devdome-safe-media-cleaner') . '</div></div>';
+        return;
+    }
+    // The save redirect lands HERE: say what happened on this tab too (the Overview shows the same flags).
+    if (isset($_GET['mc_saved'])) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only display flag from a PRG redirect.
+        echo '<div class="max-w-5xl px-6 pt-6"><div class="dd-banner dd-banner-ok dd-flash">' . esc_html__('Settings saved.', 'devdome-safe-media-cleaner') . '</div></div>';
+    } elseif (isset($_GET['mc_err']) && $_GET['mc_err'] === 'settings') { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- compared against a fixed value.
+        echo '<div class="max-w-5xl px-6 pt-6"><div class="dd-banner dd-banner-error dd-flash">' . esc_html__('The settings could not be saved (database write failed). Nothing changed; try again.', 'devdome-safe-media-cleaner') . '</div></div>';
+    }
     $notif_on = devdsame_get_int('email_notifications', 0);
     $notif_freq = devdsame_get_int('notification_frequency_days', 7);
     $mc_account_id = devdsame_connected_account_id();

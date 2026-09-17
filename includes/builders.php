@@ -58,6 +58,10 @@ function devdsame_collect_builders(&$ids, &$haystack)
              ORDER BY meta_id ASC LIMIT %d",
             array_merge($meta_keys, array($last, $chunk))
         ));
+        if ($wpdb->last_error !== '') {
+            devdsame_db_read_failed();
+            break;
+        }
         if (!$rows) {
             break;
         }
@@ -86,6 +90,10 @@ function devdsame_collect_builders(&$ids, &$haystack)
              ORDER BY meta_id ASC LIMIT %d",
             array_merge($tve, array($last, 500))
         ));
+        if ($wpdb->last_error !== '') {
+            devdsame_db_read_failed();
+            break;
+        }
         if (!$rows) {
             break;
         }
@@ -113,7 +121,11 @@ function devdsame_parse_builder_blob($v, &$ids, &$haystack)
 
     // Any uploads URL/path -> haystack.
     if (strpos($lv, 'uploads') !== false || strpos($lv, 'http') !== false) {
-        $haystack .= "\n" . $lv;
+        if (strlen($haystack) + strlen($lv) <= devdsame_haystack_cap()) {
+            $haystack .= "\n" . $lv;
+        } else {
+            $GLOBALS['devdsame_haystack_truncated'] = true; // capped: items become uncertain, never unused
+        }
     }
 
     // "id":N, "ids":[...], wp-image-N (covers Elementor image widgets, background_image.id,
@@ -124,7 +136,12 @@ function devdsame_parse_builder_blob($v, &$ids, &$haystack)
     // {"background_image":{"id":N}}; pull any "url":"...uploads..." too.
     if (preg_match_all('/"url"\s*:\s*"([^"]*uploads[^"]*)"/i', $decoded, $m)) {
         foreach ($m[1] as $u) {
-            $haystack .= "\n" . strtolower(stripslashes($u));
+            $u = strtolower(stripslashes($u));
+            if (strlen($haystack) + strlen($u) <= devdsame_haystack_cap()) {
+                $haystack .= "\n" . $u;
+            } else {
+                $GLOBALS['devdsame_haystack_truncated'] = true;
+            }
         }
     }
 
@@ -159,6 +176,10 @@ function devdsame_has_unreadable_builder_data()
     // unslash signals an unreadable blob (corrupt/partial). We sample a handful.
     // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- bounded sample of a single fixed builder key; literal LIMIT.
     $rows = $wpdb->get_col("SELECT meta_value FROM {$wpdb->postmeta} WHERE meta_key = '_elementor_data' AND meta_value <> '' LIMIT 50");
+    if ($wpdb->last_error !== '') {
+        devdsame_db_read_failed();
+        $unreadable = true; // cannot tell: treat builder data as unreadable, items become uncertain
+    }
     if ($rows) {
         foreach ($rows as $v) {
             $j = json_decode(wp_unslash((string) $v), true);

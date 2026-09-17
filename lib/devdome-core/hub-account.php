@@ -10,6 +10,89 @@
 defined('ABSPATH') || exit;
 
 /**
+ * Site identity = the DOMAIN (owner 2026-09-13). On a subdirectory multisite every blog shares
+ * the network's host, so every blog shares ONE token and ONE site id: reads and writes of the two
+ * identity options are routed to the main site through option filters, which covers every
+ * plugin's own get_option() calls without touching them. Subdomain multisite blogs keep their own
+ * host and their own identity. Connection state stays per blog: each blog presses Connect once
+ * and the server treats it as the same site. Core 1.7.0.
+ */
+if (!function_exists('devdcorev1_shared_identity')) {
+    function devdcorev1_shared_identity()
+    {
+        // Three cheap calls, evaluated each time: switch_to_blog() can change the answer within one request.
+        return function_exists('is_multisite') && is_multisite()
+            && function_exists('is_subdomain_install') && !is_subdomain_install()
+            && function_exists('is_main_site') && !is_main_site();
+    }
+    /** pre_option_<identity option>: the main site's value, read once per request. */
+    function devdcorev1_identity_read($pre, $option, $reset = null)
+    {
+        static $cache = array(), $reading = false;
+        if (null !== $reset) {
+            unset($cache[$option]); // a write went to the main site: drop the per-request copy
+            return $pre;
+        }
+        if ($reading) {
+            return $pre; // get_blog_option() below runs get_option() on the main site: no recursion
+        }
+        if (!array_key_exists($option, $cache)) {
+            $reading = true;
+            $cache[$option] = (string) get_blog_option(get_main_site_id(), $option, '');
+            $reading = false;
+        }
+        return $cache[$option];
+    }
+    /** pre_update_option_<identity option>: the write lands on the main site; the local row is never read. */
+    function devdcorev1_identity_write($value, $old_value, $option)
+    {
+        static $writing = false;
+        if ($writing) {
+            return $value; // update_blog_option() below runs update_option() on the main site, which fires this same filter: let that inner write land
+        }
+        $writing = true;
+        update_blog_option(get_main_site_id(), $option, $value);
+        $writing = false;
+        devdcorev1_identity_read(false, $option, true); // drop the per-request copy
+        return $old_value; // unchanged locally = WordPress skips the local write
+    }
+    if (devdcorev1_shared_identity()) {
+        foreach (array('devdcorev1_site_id', 'devdcorev1_site_token') as $devdcorev1_o) {
+            add_filter('pre_option_' . $devdcorev1_o, 'devdcorev1_identity_read', 10, 2);
+            add_filter('pre_update_option_' . $devdcorev1_o, 'devdcorev1_identity_write', 10, 3);
+        }
+        unset($devdcorev1_o);
+    }
+}
+
+/**
+ * The stored identity must be THIS host. A site that moved (migration, clone, staging copy) keeps
+ * the old domain's id in its options: it would show the old domain's connection and its reconnect
+ * would fail the callback check on the server (review 2026-09-13). When the host changed, the id
+ * follows the host and the connection is reset so the hub shows Connect again; the token stays
+ * (the new domain proves it on the next Connect). Returns true when a move was handled.
+ */
+if (!function_exists('devdcorev1_reconcile_identity')) {
+    function devdcorev1_reconcile_identity()
+    {
+        if (function_exists('devdcorev1_shared_identity') && devdcorev1_shared_identity()) {
+            return false; // the identity is the network's (read through the main site): a mapped-domain subsite must never rewrite it (Codex high round 7)
+        }
+        $current = strtolower((string) wp_parse_url(home_url(), PHP_URL_HOST));
+        $stored  = strtolower((string) get_option('devdcorev1_site_id', ''));
+        if ('' === $current || '' === $stored || $stored === $current) {
+            return false;
+        }
+        update_option('devdcorev1_site_id', $current);
+        foreach (array('devdcorev1_conn_state', 'devdcorev1_connected_at', 'devdcorev1_account_id', 'devdcorev1_account_email', 'devdcorev1_connect_started', 'devdcorev1_hub_connect_dismissed') as $o) {
+            delete_option($o);
+        }
+        delete_transient('devdcorev1_conn_checked');
+        return true;
+    }
+}
+
+/**
  * Suite-wide, server-VERIFIED account connection state: {ok, account_id, email}.
  * "Connected" means the suite's site token (option devdcorev1_site_token, provisioned by the
  * one-click connect in any DevDome plugin) is linked to a DevDome account RIGHT NOW — the
@@ -19,22 +102,38 @@ defined('ABSPATH') || exit;
  * function_exists-guarded so plugins can ship helpers of the same name safely.
  */
 if (!function_exists('devdcorev1_connection_state')) {
-    function devdcorev1_connection_state($force = false)
+    function devdcorev1_connection_state($force = false, $reconcile = true)
     {
+        if ($reconcile) {
+            devdcorev1_reconcile_identity(); // a moved site resets here (hub and plugin screens), never from a read-only ability
+        }
         $state = get_option('devdcorev1_conn_state', array('ok' => 0, 'account_id' => '', 'email' => '', 'plan' => ''));
         if (!is_array($state)) {
             $state = array('ok' => 0, 'account_id' => '', 'email' => '', 'plan' => '');
         }
         $state += array('plan' => ''); // states stored before the plan field existed
-        if (!$force && get_transient('devdcorev1_conn_checked')) {
-            return $state;
+        global $wpdb;
+        if (isset($wpdb->last_error)) {
+            $wpdb->last_error = '';
         }
         $token = (string) get_option('devdcorev1_site_token', '');
+        if (isset($wpdb->last_error) && '' !== (string) $wpdb->last_error) {
+            // The token could not be READ (core 1.7.1, Analytics round 1): an empty answer from a broken options
+            // read is not "never connected". Last known state, nothing written, nothing called.
+            return $state;
+        }
         if ('' === $token) {
-            // No token = never connected anywhere in the suite. Definitive, no remote call.
-            $state = array('ok' => 0, 'account_id' => '', 'email' => '');
-            update_option('devdcorev1_conn_state', $state, false);
-            set_transient('devdcorev1_conn_checked', 1, 12 * HOUR_IN_SECONDS);
+            // No token = never connected anywhere in the suite. Definitive, no remote call, and checked BEFORE the
+            // cached answer (DeepSeek core round 1): a token removed elsewhere must not read as connected for the
+            // rest of the cache window.
+            if (!empty($state['ok']) || !get_transient('devdcorev1_conn_checked')) {
+                $state = array('ok' => 0, 'account_id' => '', 'email' => '');
+                update_option('devdcorev1_conn_state', $state, false);
+                set_transient('devdcorev1_conn_checked', 1, 12 * HOUR_IN_SECONDS);
+            }
+            return array('ok' => 0, 'account_id' => '', 'email' => '', 'plan' => '');
+        }
+        if (!$force && get_transient('devdcorev1_conn_checked')) {
             return $state;
         }
         // No calling home before the user opts in (wp.org Guideline 7): the token is
@@ -70,7 +169,7 @@ if (!function_exists('devdcorev1_connection_state')) {
         }
         $code = (int) wp_remote_retrieve_response_code($resp);
         $data = json_decode(wp_remote_retrieve_body($resp), true);
-        if (200 === $code && is_array($data) && !empty($data['email']) && is_email($data['email'])) {
+        if (200 === $code && is_array($data) && !empty($data['ok']) && !empty($data['email']) && is_email($data['email'])) {
             $acct = isset($data['account_id']) ? strtoupper(sanitize_text_field($data['account_id'])) : '';
             $state = array(
                 'ok'         => 1,
@@ -82,8 +181,10 @@ if (!function_exists('devdcorev1_connection_state')) {
             // 15 min, not 12 h: the hub shows the account PLAN from this state, and a plan
             // change (upgrade/downgrade) must reach the dashboard within minutes.
             set_transient('devdcorev1_conn_checked', 1, 15 * MINUTE_IN_SECONDS);
-        } elseif (in_array($code, array(400, 401, 403, 404), true)) {
+        } elseif (in_array($code, array(400, 401, 403, 404), true) && is_array($data) && isset($data['ok']) && !$data['ok']) {
             // Definitive: the token is not linked to an account (or was unlinked server-side).
+            // Only the account server's own structured refusal counts (core 1.7.0): a 404 page
+            // from a proxy or a host outage carries no JSON and must not wipe a live connection.
             $state = array('ok' => 0, 'account_id' => '', 'email' => '');
             update_option('devdcorev1_conn_state', $state, false);
             set_transient('devdcorev1_conn_checked', 1, HOUR_IN_SECONDS);
@@ -111,17 +212,27 @@ if (!function_exists('devdcorev1_account_is_connected')) {
  * sends the browser to devdome.com carrying ONLY the opaque request token. Before this click,
  * the suite makes no account request at all.
  */
+/** Capability for connect/disconnect: the network's, when the identity is shared by every blog of a subdirectory multisite. */
+function devdcorev1_connect_cap()
+{
+    // The main site of a subdirectory network holds the identity every sub-site reads (Codex high round 3): its
+    // administrators need the network capability too, not only the sub-sites'.
+    $network = function_exists('is_multisite') && is_multisite() && function_exists('is_subdomain_install') && !is_subdomain_install();
+    return $network ? 'manage_network' : 'manage_options';
+}
+
 function devdcorev1_hub_handle_connect_go()
 {
-    if (!current_user_can('manage_options')) {
+    if (!current_user_can(devdcorev1_connect_cap())) {
         wp_die('You are not allowed to do that.');
     }
     check_admin_referer('devdcorev1_connect_go');
+    devdcorev1_reconcile_identity();
     update_option('devdcorev1_connect_started', time(), false);
     $tools = admin_url('admin.php?page=' . (defined('DEVDCOREV1_TOOLS_MENU_SLUG') ? DEVDCOREV1_TOOLS_MENU_SLUG : 'devdome-tools'));
     // Optional `return`: the plugin screen the user came from, shown again once the connect
     // completes (1.5.9). Same-site URLs only (wp_validate_redirect); anything else = the hub.
-    $return = isset($_GET['return']) ? wp_validate_redirect(esc_url_raw(wp_unslash($_GET['return'])), '') : '';
+    $return = isset($_GET['return']) && is_string($_GET['return']) ? wp_validate_redirect(esc_url_raw(wp_unslash($_GET['return'])), '') : '';
     // Auto-provision the suite identity so connecting is one click (mirrors the plugins'
     // activation provisioning; covers a suite where no plugin has provisioned it yet).
     $site = (string) get_option('devdcorev1_site_id', '');
@@ -160,7 +271,14 @@ function devdcorev1_hub_handle_connect_go()
     $rt = sanitize_key((string) $data['request_token']);
     // 20 min, not 10: the server gives the request 10 min to be authorized and then a fresh
     // 10 min for the claim, so a slow sign-in must not outlive the local correlation.
-    set_transient('devdcorev1_connrt_' . $rt, (string) $data['nonce'], 20 * MINUTE_IN_SECONDS);
+    // The browser comes back with the opaque request token only. Storing the starting user + a WP
+    // nonce with it binds the completion to the session that pressed Connect (wp.org review
+    // 2026-09-16); the remote nonce authenticates the server-to-server claim.
+    set_transient('devdcorev1_connrt_' . $rt, array(
+        'remote_nonce' => (string) $data['nonce'],
+        'user_id'      => get_current_user_id(),
+        'wp_nonce'     => wp_create_nonce('devdcorev1_connect_complete_' . $rt),
+    ), 20 * MINUTE_IN_SECONDS);
     if ('' !== $return) {
         set_transient('devdcorev1_connret_' . $rt, $return, 20 * MINUTE_IN_SECONDS);
     }
@@ -178,19 +296,24 @@ add_action('admin_post_devdcorev1_connect_go', 'devdcorev1_hub_handle_connect_go
  */
 function devdcorev1_hub_maybe_complete_connect()
 {
-    if (!current_user_can('manage_options')) {
+    if (!current_user_can(devdcorev1_connect_cap())) {
         return;
     }
     $slug = defined('DEVDCOREV1_TOOLS_MENU_SLUG') ? DEVDCOREV1_TOOLS_MENU_SLUG : 'devdome-tools';
-    // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- this IS the connect return; the CSRF guard is the single-use transient correlation on `rt`, not a form nonce.
-    if (!isset($_GET['page'], $_GET['dd_connect'], $_GET['rt']) || $slug !== sanitize_key(wp_unslash($_GET['page']))) {
+    // This IS the connect return: the CSRF guard is the single-use `rt` correlation whose stored WP nonce is verified below.
+    if (!isset($_GET['page'], $_GET['dd_connect'], $_GET['rt']) || !is_string($_GET['page']) || !is_string($_GET['rt']) || $slug !== sanitize_key(wp_unslash($_GET['page']))) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- nonce verified below against the rt record
         return;
     }
     $tools = admin_url('admin.php?page=' . (defined('DEVDCOREV1_TOOLS_MENU_SLUG') ? DEVDCOREV1_TOOLS_MENU_SLUG : 'devdome-tools'));
-    // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- see above.
-    $rt    = sanitize_key(wp_unslash($_GET['rt']));
-    $nonce = '' !== $rt ? get_transient('devdcorev1_connrt_' . $rt) : false;
-    if (false === $nonce) {
+    $rt      = sanitize_key(wp_unslash($_GET['rt'])); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- verified on the next lines
+    $pending = '' !== $rt ? get_transient('devdcorev1_connrt_' . $rt) : false;
+    $nonce   = false;
+    if (is_array($pending) && isset($pending['remote_nonce'], $pending['user_id'], $pending['wp_nonce'])
+        && get_current_user_id() === (int) $pending['user_id']
+        && wp_verify_nonce((string) $pending['wp_nonce'], 'devdcorev1_connect_complete_' . $rt)) {
+        $nonce = (string) $pending['remote_nonce'];
+    }
+    if (false === $nonce) { // no record, another user, or a record from an older core: start Connect again
         wp_safe_redirect(add_query_arg('dd_error', 'expired', $tools));
         exit;
     }
@@ -213,7 +336,8 @@ function devdcorev1_hub_maybe_complete_connect()
         )),
     ));
     $data = is_wp_error($resp) ? null : json_decode(wp_remote_retrieve_body($resp), true);
-    $acct = ( is_array($data) && !empty($data['ok']) && !empty($data['account_id']) )
+    // HTTP 200 as well as the payload (core 1.7.0): success-shaped JSON on an error status is not a claim.
+    $acct = ( !is_wp_error($resp) && 200 === (int) wp_remote_retrieve_response_code($resp) && is_array($data) && !empty($data['ok']) && !empty($data['account_id']) )
         ? strtoupper(sanitize_text_field((string) $data['account_id'])) : '';
     if (!preg_match('/^DD\d{8}$/', $acct)) {
         // Say WHY (the hub renders dd_error + dd_why): transport error text, or the server's
@@ -229,15 +353,53 @@ function devdcorev1_hub_maybe_complete_connect()
         wp_safe_redirect(add_query_arg(array('dd_error' => 'verify', 'dd_why' => rawurlencode(substr(sanitize_text_field($why), 0, 160)), 'dd_retry' => $rt), $tools));
         exit;
     }
-    delete_transient('devdcorev1_connrt_' . $rt);
-    delete_transient('devdcorev1_connret_' . $rt);
+    $stamp = gmdate('c');
+    // Fail closed FIRST (Codex Analytics round 7): a negative verdict with no account is written and read back before
+    // any identity row changes. Whatever fails from here on, every reader sees "not connected" and the retry link
+    // (the correlation transient stays) finishes the handshake; a verdict that did not even land changes nothing.
+    $neg = array('ok' => 0, 'account_id' => '', 'email' => '', 'plan' => '');
+    update_option('devdcorev1_conn_state', $neg, false);
+    $chk = get_option('devdcorev1_conn_state', null);
+    if (!is_array($chk) || !empty($chk['ok']) || '' !== (string) (isset($chk['account_id']) ? $chk['account_id'] : '')) {
+        wp_safe_redirect(add_query_arg(array('dd_error' => 'verify', 'dd_why' => rawurlencode('the connection could not be saved: the database did not keep it'), 'dd_retry' => $rt), $tools));
+        exit;
+    }
     update_option('devdcorev1_account_id', $acct);
-    update_option('devdcorev1_connected_at', gmdate('c'));
+    update_option('devdcorev1_connected_at', $stamp);
     // The claim itself is the proof of connection: record it locally FIRST, so the UI lands
     // connected even when the follow-up account lookup below fails (it then keeps this state).
     update_option('devdcorev1_conn_state', array('ok' => 1, 'account_id' => $acct, 'email' => '', 'plan' => ''), false);
+    // Proved before the retry handle goes (core 1.7.1, Analytics round 2): a lost write used to end in a clean
+    // redirect with no connection and no way to retry. update_option() leaves the cache untouched when the row
+    // did not take, so the read-back is the row's answer.
+    $st = get_option('devdcorev1_conn_state', array());
+    // The stamp too (Codex Analytics round 5): the plugins lift their own stop markers from devdcorev1_connected_at,
+    // so a lost stamp write would leave Analytics stopped on a site the hub calls connected.
+    if ((string) get_option('devdcorev1_account_id', '') !== $acct || (string) get_option('devdcorev1_connected_at', '') !== $stamp
+        || !is_array($st) || empty($st['ok']) || (string) (isset($st['account_id']) ? $st['account_id'] : '') !== $acct) { // the verdict's own account too (Codex Analytics round 6)
+        // Half a connection is no connection: back to the negative verdict and no stamp, each step read back; when
+        // even the verdict cannot be rewritten the rows that would paint "connected" are dropped instead.
+        update_option('devdcorev1_conn_state', $neg, false);
+        delete_option('devdcorev1_connected_at');
+        $chk = get_option('devdcorev1_conn_state', null);
+        if (!is_array($chk) || !empty($chk['ok'])) {
+            delete_option('devdcorev1_conn_state');
+            delete_option('devdcorev1_account_id');
+        }
+        wp_safe_redirect(add_query_arg(array('dd_error' => 'verify', 'dd_why' => rawurlencode('the connection could not be saved: the database did not keep it'), 'dd_retry' => $rt), $tools));
+        exit;
+    }
+    delete_transient('devdcorev1_connrt_' . $rt);
+    delete_transient('devdcorev1_connret_' . $rt);
     delete_transient('devdcorev1_conn_checked');
     devdcorev1_connection_state(true); // fetch email + plan now so the UI shows them
+    /**
+     * The site just connected (core 1.7.1): plugins that keep their own "disconnected" markers lift them here
+     * instead of watching devdcorev1_connected_at.
+     *
+     * @param string $acct The account id (DD + 8 digits).
+     */
+    do_action('devdcorev1_connected', $acct);
     // Back to the screen the user connected from (a plugin's own page), else the hub.
     wp_safe_redirect((is_string($back) && '' !== $back) ? $back : $tools);
     exit;
@@ -258,8 +420,7 @@ if (!function_exists('devdcorev1_serve_connect_proof')) {
             : '';
         // Query form (core 1.6.6): hosts that answer /.well-known/* from the web server never let
         // this handler run, so the same proof is also served on the home URL with a query flag.
-        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- public one-way hash, no state change.
-        $query_form = isset($_GET['devdome-connect-proof']) && '1' === (string) wp_unslash($_GET['devdome-connect-proof']);
+        $query_form = isset($_GET['devdome-connect-proof']) && is_string($_GET['devdome-connect-proof']) && '1' === sanitize_key(wp_unslash($_GET['devdome-connect-proof'])); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- public one-way hash, no state change.
         if ('/.well-known/devdome-connect-proof.txt' !== $path && !$query_form) {
             return;
         }
@@ -281,7 +442,7 @@ if (!function_exists('devdcorev1_serve_connect_proof')) {
  */
 function devdcorev1_hub_handle_account()
 {
-    if (empty($_POST['devdcorev1_disconnect']) || !current_user_can('manage_options')) {
+    if (empty($_POST['devdcorev1_disconnect']) || !current_user_can(devdcorev1_connect_cap())) {
         return;
     }
     check_admin_referer('devdcorev1_account', '_ddacct');
@@ -298,7 +459,9 @@ function devdcorev1_hub_handle_account()
         // The local state is cleared either way (the owner asked to disconnect), but a timeout or a refusal means
         // the account server still lists this site: say so instead of "Disconnected" (review 2026-09-10).
         $code      = is_wp_error($res) ? 0 : (int) wp_remote_retrieve_response_code($res);
-        $remote_ok = $code >= 200 && $code < 300;
+        $rbody     = is_wp_error($res) ? null : json_decode(wp_remote_retrieve_body($res), true);
+        // 2xx alone is not an unlink (core 1.7.0): a proxy page or {"ok":false} on 200 leaves the site listed.
+        $remote_ok = $code >= 200 && $code < 300 && is_array($rbody) && isset($rbody['ok']) && true === $rbody['ok']; // strict: {"ok":"false"} is not an unlink (Codex round 6)
     }
     delete_option('devdcorev1_conn_state');
     delete_transient('devdcorev1_conn_checked');
@@ -307,9 +470,22 @@ function devdcorev1_hub_handle_account()
     delete_option('devdcorev1_account_email');
     delete_option('devdcorev1_connect_started');
     delete_option('devdcorev1_hub_connect_dismissed'); // the connect card should reappear
-    devdcorev1_connection_state(true); // re-verify now so the UI flips immediately
+    // The local clear is proved on the rows, not assumed (core 1.7.0, Codex high round 24): a delete that did not
+    // land leaves the site connected and every cloud switch on while the screen said "Disconnected".
+    global $wpdb;
+    // The consent stamp too (Codex round 6): a surviving devdcorev1_connect_started let the next verification
+    // call home and re-paint "connected" without another Connect action.
+    $left = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM {$wpdb->options} WHERE option_name IN (%s, %s, %s, %s)",
+        'devdcorev1_conn_state', 'devdcorev1_account_id', 'devdcorev1_connected_at', 'devdcorev1_connect_started'
+    ));
+    $local_ok = $left !== null && (int) $left === 0 && (string) $wpdb->last_error === '';
+    $state    = devdcorev1_connection_state(true); // re-verify now so the UI flips immediately
+    if (is_array($state) && !empty($state['ok'])) {
+        $local_ok = false; // still verified as connected after the clear: nothing was disconnected (the state key is "ok"; DeepSeek core round 1)
+    }
     wp_safe_redirect(add_query_arg(
-        array('page' => DEVDCOREV1_TOOLS_MENU_SLUG, 'ddacct' => $remote_ok ? 'disconnected' : 'disconnected-local'),
+        array('page' => DEVDCOREV1_TOOLS_MENU_SLUG, 'ddacct' => !$local_ok ? 'disconnect-failed' : ($remote_ok ? 'disconnected' : 'disconnected-local')),
         admin_url('admin.php')
     ));
     exit;

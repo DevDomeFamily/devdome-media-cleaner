@@ -32,7 +32,8 @@ if (!function_exists('devdcorev1_uninstall_cleanup')) {
         }
 
         // Last one out — remove the shared-core artifacts.
-        wp_clear_scheduled_hook('devdcorev1_refresh_feeds');
+        wp_unschedule_hook('devdcorev1_refresh_feeds'); // argument-independent (DeepSeek core round 1)
+        delete_site_transient('devdcorev1_hub_catalog_remote'); // the 12 h remote catalog is a SITE transient, outside the sweep below
         delete_option('devdcorev1_feeds');
         delete_transient('devdcorev1_feed_init');
 
@@ -48,6 +49,10 @@ if (!function_exists('devdcorev1_uninstall_cleanup')) {
         }
         global $wpdb;
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- uninstall sweep of this library's own transients.
-        $wpdb->query("DELETE FROM {$wpdb->options} WHERE option_name LIKE '\\_transient\\_devdcorev1\\_%' OR option_name LIKE '\\_transient\\_timeout\\_devdcorev1\\_%'");
+        $wpdb->query($wpdb->prepare(
+            "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s",
+            $wpdb->esc_like('_transient_devdcorev1_') . '%',
+            $wpdb->esc_like('_transient_timeout_devdcorev1_') . '%'
+        ));
     }
 }

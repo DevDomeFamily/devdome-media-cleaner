@@ -208,11 +208,19 @@ function devdsame_rest_job_control(WP_REST_Request $request)
 {
     $action = sanitize_key((string) $request->get_param('action'));
     if ($action === 'pause') {
-        devdsame_pause_job();
+        if (!devdsame_pause_job()) {
+            return new WP_Error('devdsame_job_control_failed', __('The job could not be paused (state write failed); it keeps running.', 'devdome-safe-media-cleaner'), array('status' => 500));
+        }
     } elseif ($action === 'resume') {
-        devdsame_resume_job();
+        if (!devdsame_resume_job()) {
+            return new WP_Error('devdsame_job_control_failed', __('The job could not be resumed (state write failed).', 'devdome-safe-media-cleaner'), array('status' => 500));
+        }
+    } elseif (!in_array($action, array('pause', 'resume', 'cancel'), true)) {
+        return new WP_Error('devdsame_bad_action', __('Unknown action.', 'devdome-safe-media-cleaner'), array('status' => 400));
     } elseif ($action === 'cancel') {
-        devdsame_cancel_job();
+        if (!devdsame_cancel_job()) {
+            return new WP_Error('devdsame_cancel_failed', __('The job could not be cancelled: its rollback marker could not be saved, so it keeps running.', 'devdome-safe-media-cleaner'), array('status' => 500));
+        }
     }
     return rest_ensure_response(devdsame_job_progress());
 }
@@ -220,33 +228,47 @@ function devdsame_rest_job_control(WP_REST_Request $request)
 /** GET /scan-results — paginated + filtered review data with thumbnails. */
 function devdsame_rest_results(WP_REST_Request $request)
 {
+    return rest_ensure_response(devdsame_scan_items_page($request->get_params()));
+}
+
+/**
+ * One page of scan items with the review filters. The REST route and the Abilities API share it.
+ * $args keys (all optional): scan_id, page, per_page, status, min_bytes, search, month, mime, folder,
+ * selected_only, orderby, order. Every value is allowlisted or typed here.
+ */
+function devdsame_scan_items_page($args)
+{
     global $wpdb;
     $items = $wpdb->prefix . 'devdsame_scan_items';
+    $args = is_array($args) ? $args : array();
+    $get = function ($key, $default = '') use ($args) {
+        return isset($args[$key]) ? $args[$key] : $default;
+    };
 
-    $scan_id = (int) ($request->get_param('scan_id') ?: devdsame_latest_scan_id());
-    $page = max(1, (int) $request->get_param('page'));
-    $per = max(1, min(200, (int) ($request->get_param('per_page') ?: 20)));
+    $scan_id = (int) ($get('scan_id') ?: devdsame_latest_scan_id());
+    $page = max(1, (int) $get('page'));
+    $per = max(1, min(200, (int) ($get('per_page') ?: 20)));
     $offset = ($page - 1) * $per;
 
     // Filters (all allowlisted / typed).
     $valid_status = array('all', 'used', 'unused', 'uncertain', 'missing', 'orphan', 'duplicate');
-    $status = sanitize_key((string) $request->get_param('status'));
+    $status = sanitize_key((string) $get('status'));
     $status = in_array($status, $valid_status, true) ? $status : 'unused';
 
-    $min_bytes = (int) $request->get_param('min_bytes');
-    $search = substr(sanitize_text_field((string) $request->get_param('search')), 0, 100);
-    $month = sanitize_text_field((string) $request->get_param('month')); // YYYY-MM
-    $mime = sanitize_text_field((string) $request->get_param('mime'));
-    $folder = sanitize_text_field((string) $request->get_param('folder')); // e.g. 2026/06
-    $selected_only = (int) $request->get_param('selected_only');
+    $min_bytes = (int) $get('min_bytes');
+    $search = substr(sanitize_text_field((string) $get('search')), 0, 100);
+    $month = sanitize_text_field((string) $get('month')); // YYYY-MM
+    $mime = sanitize_text_field((string) $get('mime'));
+    $folder = sanitize_text_field((string) $get('folder')); // e.g. 2026/06
+    $selected_only = (int) $get('selected_only');
 
     $valid_orderby = array('file_size', 'confidence', 'upload_date', 'id', 'dimensions');
-    $orderby = sanitize_key((string) $request->get_param('orderby'));
+    $orderby = sanitize_key((string) $get('orderby'));
     $orderby = in_array($orderby, $valid_orderby, true) ? $orderby : 'file_size';
     if ($orderby === 'dimensions') {
         $orderby = '(width * height)'; // pixel size (e.g. 1500x1500), not bytes
     }
-    $order = strtoupper((string) $request->get_param('order')) === 'ASC' ? 'ASC' : 'DESC';
+    $order = strtoupper((string) $get('order')) === 'ASC' ? 'ASC' : 'DESC';
 
     $where = array('scan_id = %d');
     $params = array($scan_id);
@@ -286,7 +308,12 @@ function devdsame_rest_results(WP_REST_Request $request)
     // Total for pagination.
     $count_params = $params;
     // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal scan_items count; WHERE values bound via prepare.
-    $total = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$items} WHERE {$where_sql}", $count_params));
+    $total = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$items} WHERE {$where_sql}", $count_params));
+    if ($total === null || $wpdb->last_error !== '') {
+        // A failed read must not render as an empty, clean site.
+        return new WP_Error('devdsame_db_read', __('The scan results could not be read from the database right now.', 'devdome-safe-media-cleaner'), array('status' => 500));
+    }
+    $total = (int) $total;
 
     $params[] = $per;
     $params[] = $offset;
@@ -295,6 +322,9 @@ function devdsame_rest_results(WP_REST_Request $request)
         "SELECT * FROM {$items} WHERE {$where_sql} ORDER BY {$orderby} {$order} LIMIT %d OFFSET %d",
         $params
     ), ARRAY_A);
+    if ($wpdb->last_error !== '') {
+        return new WP_Error('devdsame_db_read', __('The scan results could not be read from the database right now.', 'devdome-safe-media-cleaner'), array('status' => 500));
+    }
 
     $out = array();
     foreach ((array) $rows as $r) {
@@ -329,14 +359,14 @@ function devdsame_rest_results(WP_REST_Request $request)
         );
     }
 
-    return rest_ensure_response(array(
+    return array(
         'scan_id'  => $scan_id,
         'page'     => $page,
         'per_page' => $per,
         'total'    => $total,
         'pages'    => (int) ceil($total / $per),
         'items'    => $out,
-    ));
+    );
 }
 
 /** Read a list of scan_item ids from a request, sanitized to ints. */
@@ -357,23 +387,80 @@ function devdsame_request_item_ids(WP_REST_Request $request)
  */
 function devdsame_rest_clear_trash_history(WP_REST_Request $request)
 {
+    $ids = devdsame_clear_trash_history();
+    if ($ids === null) {
+        return new WP_Error('devdsame_db_write', __('The batch list could not be cleared (database error). Nothing was changed.', 'devdome-safe-media-cleaner'), array('status' => 500));
+    }
+    return rest_ensure_response(array('cleared' => count($ids), 'ids' => $ids));
+}
+
+/** Remove every batch record with nothing left to restore. Returns the removed batch ids. Shared with the Abilities API. */
+function devdsame_clear_trash_history()
+{
     global $wpdb;
     $tb = $wpdb->prefix . 'devdsame_trash_batches';
     $ti = $wpdb->prefix . 'devdsame_trash_items';
-    // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal history cleanup on our own tables.
-    $ids = array_map('intval', (array) $wpdb->get_col(
+    // A batch a running cleanup just created has no items yet: it is not history. Neither is
+    // any batch younger than 15 minutes with nothing in it, nor one with claimed (restoring or
+    // deleting) items.
+    $job = devdsame_get_job();
+    $active = ($job && in_array($job['status'], array('running', 'paused'), true)) ? (int) $job['batch_id'] : 0;
+    // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal history cleanup on our own tables; values bound via prepare.
+    $ids = array_map('intval', (array) $wpdb->get_col($wpdb->prepare(
         "SELECT b.id FROM {$tb} b
-         LEFT JOIN {$ti} i ON i.batch_id = b.id AND i.status = 'trashed'
-         GROUP BY b.id HAVING COUNT(i.id) = 0"
-    ));
-    if ($ids) {
-        $in = implode(',', $ids);
-        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- ids are intval'd above.
-        $wpdb->query("DELETE FROM {$ti} WHERE batch_id IN ({$in})");
-        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- ids are intval'd above.
-        $wpdb->query("DELETE FROM {$tb} WHERE id IN ({$in})");
+         LEFT JOIN {$ti} i ON i.batch_id = b.id AND i.status IN ('trashed', 'restoring', 'deleting')
+         WHERE b.id <> %d AND (b.total_files > 0 OR b.status = 'empty' OR b.created_at < %s)
+         GROUP BY b.id HAVING COUNT(i.id) = 0",
+        $active,
+        gmdate('Y-m-d H:i:s', current_time('timestamp') - 15 * MINUTE_IN_SECONDS) // created_at is site-local time
+    )));
+    if ($wpdb->last_error !== '') {
+        return null;
     }
-    return rest_ensure_response(array('cleared' => count($ids), 'ids' => $ids));
+    // A batch whose folder still holds files (a stranded move that could not be recorded) keeps
+    // its row: the row is the only way back to those files from the screen.
+    $ids = array_values(array_filter($ids, function ($id) {
+        return !devdsame_batch_folder_holds_files($id);
+    }));
+    if (!$ids) {
+        return array();
+    }
+    $in = implode(',', $ids);
+    // Both deletes or neither: a batch row must never outlive its items or the reverse.
+    $wpdb->query('START TRANSACTION'); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- two-table delete kept atomic.
+    // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- ids are intval'd above.
+    $ok = $wpdb->query("DELETE FROM {$ti} WHERE batch_id IN ({$in})") !== false;
+    // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- ids are intval'd above.
+    $ok = $ok && $wpdb->query("DELETE FROM {$tb} WHERE id IN ({$in})") !== false;
+    if (!$ok) {
+        $wpdb->query('ROLLBACK'); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- undo the half-done delete.
+        return null;
+    }
+    $wpdb->query('COMMIT'); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- both deletes landed.
+    // Report only what is really gone.
+    // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- ids are intval'd above.
+    $left = array_map('intval', (array) $wpdb->get_col("SELECT id FROM {$tb} WHERE id IN ({$in})"));
+    return array_values(array_diff($ids, $left));
+}
+
+/** True when a batch's bin folder holds anything besides manifest.json (unreadable = true: never assume empty). */
+function devdsame_batch_folder_holds_files($batch_id)
+{
+    $dir = devdsame_safe_trash_dir((int) $batch_id);
+    if (!is_dir($dir) || is_link($dir)) {
+        return false;
+    }
+    try {
+        $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS));
+        foreach ($it as $f) {
+            if ($f->isFile() && $f->getFilename() !== 'manifest.json') {
+                return true;
+            }
+        }
+    } catch (Exception $e) {
+        return true;
+    }
+    return false;
 }
 
 /** POST /restore-backup { backup_id } — start a backup-restore job (async, no page reload). */
@@ -397,8 +484,22 @@ function devdsame_rest_restore_backup(WP_REST_Request $request)
  */
 function devdsame_rest_clean(WP_REST_Request $request)
 {
+    $job = devdsame_start_clean($request->get_param('scope') === 'disk' ? 'disk' : 'library');
+    if (is_wp_error($job)) {
+        return new WP_Error($job->get_error_code(), $job->get_error_message(), array('status' => $job->get_error_code() === 'devdsame_empty' ? 400 : 409));
+    }
+    // Respond immediately — the poller drives the ticks (same pattern as start-scan).
+    return rest_ensure_response(devdsame_job_progress());
+}
+
+/**
+ * Start the one-click clean: every unused (library) or orphan (disk) item of the latest scan of that
+ * scope goes to the Recycle Bin as one batch. Returns the job or a WP_Error. Shared with the Abilities API.
+ */
+function devdsame_start_clean($scope)
+{
     global $wpdb;
-    $scope = $request->get_param('scope') === 'disk' ? 'disk' : 'library';
+    $scope = $scope === 'disk' ? 'disk' : 'library';
     $status = $scope === 'disk' ? 'orphan' : 'unused';
     $sid = (int) devdsame_latest_scan_id($scope);
     $items = $wpdb->prefix . 'devdsame_scan_items';
@@ -408,15 +509,13 @@ function devdsame_rest_clean(WP_REST_Request $request)
         $sid,
         $status
     ))) : array();
+    if ($sid && $wpdb->last_error !== '') {
+        return new WP_Error('devdsame_db_read', __('The scan results could not be read from the database; nothing was cleaned.', 'devdome-safe-media-cleaner'));
+    }
     if (!$ids) {
-        return new WP_Error('devdsame_empty', __('Nothing to clean. Run a scan first.', 'devdome-safe-media-cleaner'), array('status' => 400));
+        return new WP_Error('devdsame_empty', __('Nothing to clean. Run a scan first.', 'devdome-safe-media-cleaner'));
     }
-    $job = devdsame_start_job('trash', array('item_ids' => $ids, 'scope' => $scope, 'note' => 'clean-' . $status));
-    if (is_wp_error($job)) {
-        return new WP_Error($job->get_error_code(), $job->get_error_message(), array('status' => 409));
-    }
-    // Respond immediately — the poller drives the ticks (same pattern as start-scan).
-    return rest_ensure_response(devdsame_job_progress());
+    return devdsame_start_job('trash', array('item_ids' => $ids, 'scope' => $scope, 'note' => 'clean-' . $status));
 }
 
 /** POST /trash { item_ids:[], note } — start a background trash job. */
@@ -477,12 +576,27 @@ function devdsame_rest_protect(WP_REST_Request $request)
     $mode = sanitize_key((string) $request->get_param('mode'));
     $mode = in_array($mode, array('protect', 'ignore', 'clear'), true) ? $mode : 'protect';
 
+    $updated = 0;
+    $failed = array();
     foreach ($ids as $id) {
-        if ($mode === 'clear') {
-            devdsame_unset_protected($id);
+        if (get_post_type($id) !== 'attachment') {
+            $failed[] = $id;
+            continue;
+        }
+        $ok = $mode === 'clear' ? devdsame_unset_protected($id) : devdsame_set_protected($id, $mode);
+        if ($ok) {
+            $updated++;
         } else {
-            devdsame_set_protected($id, $mode);
+            $failed[] = $id;
         }
     }
-    return rest_ensure_response(array('updated' => count($ids), 'mode' => $mode));
+    if ($failed) {
+        return new WP_Error('devdsame_protect_failed', sprintf(
+            /* translators: 1: number marked, 2: ids that failed */
+            __('%1$d marked; these could not be written: %2$s.', 'devdome-safe-media-cleaner'),
+            $updated,
+            implode(', ', array_slice($failed, 0, 20))
+        ), array('status' => 500, 'updated' => $updated, 'failed' => $failed));
+    }
+    return rest_ensure_response(array('updated' => $updated, 'mode' => $mode));
 }

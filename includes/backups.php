@@ -12,15 +12,27 @@
 defined('ABSPATH') || exit;
 // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- every query targets this plugin's own fixed-name tables ($wpdb->prefix . 'devdsame_*') or core tables filtered by hardcoded key allowlists; table names never contain user input and all values are bound through $wpdb->prepare() (IN() lists use counted %s placeholders built with array_fill()).
 
-/** Absolute path of the backups folder (created + guarded on first use). */
+/** Where backups live (no side effects); writers call devdsame_backups_dir() first. */
+function devdsame_backups_path()
+{
+    return devdsame_uploads_basedir() . '/devdome-smc-backups';
+}
+
+/**
+ * The backups folder, created and hardened. Returns '' when it cannot be made un-servable
+ * (guard files could not be written) or is a link: nothing is written to such a folder.
+ */
 function devdsame_backups_dir()
 {
-    $dir = devdsame_uploads_basedir() . '/devdome-smc-backups';
-    if (!is_dir($dir) || !file_exists($dir . '/.htaccess')) {
-        // Same deny-all hardening as the Recycle Bin — backup ZIPs must never be
-        // publicly downloadable; the Download button streams via an authenticated
-        // admin-post handler instead.
-        devdsame_harden_dir($dir);
+    $dir = devdsame_backups_path();
+    if (is_link($dir)) {
+        return '';
+    }
+    // Same deny-all hardening as the Recycle Bin — backup ZIPs must never be publicly
+    // downloadable; the Download button streams via an authenticated admin-post handler
+    // instead. Verified on every writer's request (contents and links, not just presence).
+    if (!devdsame_harden_dir($dir)) {
+        return '';
     }
     return $dir;
 }
@@ -51,23 +63,35 @@ function devdsame_backup_add($entry)
 {
     $list = devdsame_get_array('backups');
     $list[] = $entry;
-    devdsame_update_setting('backups', $list);
+    return devdsame_update_setting('backups', $list) && devdsame_backup_get((string) $entry['id']) !== null;
 }
 
 /** Remove a backup entry + its ZIP file. */
 function devdsame_backup_remove($id)
 {
+    if (is_link(devdsame_backups_path())) {
+        return false; // never delete through a link that points elsewhere
+    }
     $list = devdsame_get_array('backups');
+    $removed = false;
     foreach ($list as $k => $b) {
         if ((string) $b['id'] === (string) $id) {
-            $path = devdsame_backups_dir() . '/' . wp_basename((string) $b['file']);
+            $path = devdsame_backups_path() . '/' . wp_basename((string) $b['file']);
             if (is_file($path)) {
                 wp_delete_file($path);
+                clearstatcache(true, $path);
+                if (is_file($path)) {
+                    return false; // the zip is still there: keep the record so it can be retried
+                }
             }
             unset($list[$k]);
+            $removed = true;
         }
     }
-    devdsame_update_setting('backups', array_values($list));
+    if (!$removed) {
+        return false;
+    }
+    return devdsame_update_setting('backups', array_values($list)) && !devdsame_backup_get($id);
 }
 
 /**
@@ -83,11 +107,14 @@ function devdsame_start_backup($scope, $what = '')
         return new WP_Error('devdsame_no_zip', __('The PHP zip extension is not available on this server.', 'devdome-safe-media-cleaner'));
     }
     $scope = $scope === 'disk' ? 'disk' : 'library';
+    if (devdsame_backups_dir() === '') {
+        return new WP_Error('devdsame_backup_dir', __('The backups folder could not be created or protected against public access; no backup was made.', 'devdome-safe-media-cleaner'));
+    }
     if ($what !== 'all') {
         $what = $scope === 'disk' ? 'orphans' : 'unused';
     }
     // Sweep manifests/part-files from crashed or cancelled jobs (>1 day old).
-    foreach ((array) glob(devdsame_backups_dir() . '/.{manifest,part}-*', GLOB_BRACE) as $stale) {
+    foreach ((array) glob(devdsame_backups_path() . '/.{manifest,part}-*', GLOB_BRACE) as $stale) {
         if (is_file($stale) && (time() - (int) filemtime($stale)) > DAY_IN_SECONDS) {
             wp_delete_file($stale);
         }
@@ -99,8 +126,8 @@ function devdsame_start_backup($scope, $what = '')
 /** Open (create) a job's backup ZIP. Returns ZipArchive or null. */
 function devdsame_backup_open_zip($job)
 {
-    $path = devdsame_backups_dir() . '/' . wp_basename((string) ($job['args']['file'] ?? ''));
-    if ($path === devdsame_backups_dir() . '/') {
+    $path = devdsame_backups_path() . '/' . wp_basename((string) ($job['args']['file'] ?? ''));
+    if ($path === devdsame_backups_path() . '/') {
         return null;
     }
     $zip = new ZipArchive();
@@ -125,7 +152,7 @@ function devdsame_backup_zip_add($zip, $abs, $rel)
 /** Path of a job's build manifest (the complete file list to zip, one "rel<TAB>abs" line each). */
 function devdsame_backup_manifest_path($job)
 {
-    return devdsame_backups_dir() . '/.manifest-' . md5((string) ($job['args']['file'] ?? '')) . '.txt';
+    return devdsame_backups_path() . '/.manifest-' . md5((string) ($job['args']['file'] ?? '')) . '.txt';
 }
 
 /**
@@ -174,6 +201,10 @@ function devdsame_backup_build_manifest($job)
                 "SELECT attachment_id FROM {$items} WHERE scan_id = %d AND status = 'unused' AND attachment_id > 0",
                 $sid
             ))) : array();
+            if ($wpdb->last_error !== '') {
+                fclose($fh); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- pairs with the fopen above.
+                return false; // a failed read would back up nothing and call it complete
+            }
         }
         $cursor = 0;
         while (true) {
@@ -187,6 +218,10 @@ function devdsame_backup_build_manifest($job)
                     $cursor,
                     1000
                 ));
+            }
+            if ($wpdb->last_error !== '') {
+                fclose($fh); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- pairs with the fopen above.
+                return false;
             }
             if (!$ids) {
                 break;
@@ -203,7 +238,15 @@ function devdsame_backup_build_manifest($job)
                 if ($abs) {
                     $rel = devdsame_path_to_relative($abs);
                     if ($rel !== '' && is_file($abs)) {
-                        fwrite($fh, $rel . "\t" . $abs . "\n"); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- manifest stream.
+                        $line = $rel . "\t" . $abs . "\n";
+
+                        if (fwrite($fh, $line) !== strlen($line)) { // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- manifest stream.
+
+                            fclose($fh); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- pairs with the manifest fopen.
+
+                            return false; // a truncated list would back up fewer files than it claims
+
+                        }
                         $count++;
                     }
                 }
@@ -218,9 +261,17 @@ function devdsame_backup_build_manifest($job)
         $basedir = devdsame_uploads_basedir();
         $trash_real = realpath(devdsame_safe_trash_dir());
         $trash_real = $trash_real ? str_replace('\\', '/', $trash_real) : '';
-        $backups_real = realpath(devdsame_backups_dir());
+        $backups_real = realpath(devdsame_backups_path());
         $backups_real = $backups_real ? str_replace('\\', '/', $backups_real) : '';
+        $never_folders = array();
+        foreach (devdsame_get_array('never_scan_folders') as $nf) {
+            $never_folders[] = strtolower(trim((string) $nf, '/'));
+        }
         $known = $what === 'all' ? array() : devdsame_known_attachment_files();
+        if ($known === null) {
+            fclose($fh); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- pairs with the manifest fopen.
+            return false; // without the library list every image would be listed as an orphan
+        }
 
         foreach (devdsame_iterate_files($basedir) as $abs) {
             $seen++;
@@ -228,10 +279,10 @@ function devdsame_backup_build_manifest($job)
                 $pulse($count, $seen);
             }
             $norm = str_replace('\\', '/', $abs);
-            if ($trash_real !== '' && strpos($norm, $trash_real) === 0) {
+            if ($trash_real !== '' && ($norm === $trash_real || strpos($norm, $trash_real . '/') === 0)) {
                 continue;
             }
-            if ($backups_real !== '' && strpos($norm, $backups_real) === 0) {
+            if ($backups_real !== '' && ($norm === $backups_real || strpos($norm, $backups_real . '/') === 0)) {
                 continue;
             }
             $bn = wp_basename($norm);
@@ -244,13 +295,32 @@ function devdsame_backup_build_manifest($job)
             if ($rel === '' || in_array($first_seg, devdsame_orphan_skip_folders(), true)) {
                 continue;
             }
+            // The user's never-scan folders are outside cleaning, so outside this backup too (same rule as the disk scan).
+            $skip_never = false;
+            foreach ($never_folders as $nf) {
+                if ($nf !== '' && ($first_seg === $nf || strpos(strtolower((string) $rel), $nf . '/') === 0)) {
+                    $skip_never = true;
+                    break;
+                }
+            }
+            if ($skip_never) {
+                continue;
+            }
             // 'orphans' (the default) backs up only what disk cleaning would delete;
             // 'all' includes library-owned files too.
             $rel_key = strtolower((string) $rel);
             if ($what !== 'all' && (isset($known[$rel_key]) || devdsame_is_variant_of_known($rel, $known))) {
                 continue;
             }
-            fwrite($fh, $rel . "\t" . $abs . "\n"); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- manifest stream.
+            $line = $rel . "\t" . $abs . "\n";
+
+            if (fwrite($fh, $line) !== strlen($line)) { // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- manifest stream.
+
+                fclose($fh); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- pairs with the manifest fopen.
+
+                return false; // a truncated list would back up fewer files than it claims
+
+            }
             $count++;
         }
     }
@@ -296,7 +366,13 @@ function devdsame_tick_backup($job, $chunk)
     }
 
     $lines = file(devdsame_backup_manifest_path($job), FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file -- manifest read.
-    $lines = is_array($lines) ? $lines : array();
+    if (!is_array($lines)) {
+        $zip->close();
+        $job['status'] = 'error';
+        $job['message'] = __('The backup file list could not be read; no backup was created.', 'devdome-safe-media-cleaner');
+        devdsame_record_error('backup_manifest', $job['message'], array('scope' => $scope));
+        return $job;
+    }
     $total = count($lines);
     $job['total'] = $total;
     $added = (int) ($job['files_added'] ?? 0);
@@ -318,12 +394,40 @@ function devdsame_tick_backup($job, $chunk)
         number_format_i18n($i),
         number_format_i18n($total)
     );
-    $zip->close(); // the actual byte copy for this tick's slice happens here
+    $path = devdsame_backups_path() . '/' . wp_basename((string) $job['args']['file']);
+    if (!$zip->close()) { // the actual byte copy for this tick's slice happens here
+        $job['status'] = 'error';
+        $job['message'] = __('The backup file could not be written (disk full or folder not writable). No backup was created.', 'devdome-safe-media-cleaner');
+        devdsame_record_error('backup_write', $job['message'], array('scope' => $scope, 'file' => wp_basename($path)));
+        wp_delete_file(devdsame_backup_manifest_path($job));
+        if (is_file($path)) {
+            wp_delete_file($path);
+        }
+        return $job;
+    }
 
     if ($i >= $total) {
         wp_delete_file(devdsame_backup_manifest_path($job));
-        $path = devdsame_backups_dir() . '/' . wp_basename((string) $job['args']['file']);
-        devdsame_backup_add(array(
+        if (!is_file($path) || ($added > 0 && (int) filesize($path) === 0)) {
+            $job['status'] = 'error';
+            $job['message'] = __('The backup file is missing or empty after writing. No backup was created.', 'devdome-safe-media-cleaner');
+            devdsame_record_error('backup_write', $job['message'], array('scope' => $scope, 'file' => wp_basename($path)));
+            return $job;
+        }
+        if ($added < $total) {
+            // Files listed but not added (vanished or unreadable): the archive is not the safety copy it claims to be.
+            $job['status'] = 'error';
+            $job['message'] = sprintf(
+                /* translators: 1: files added, 2: files expected */
+                __('Backup incomplete: %1$s of %2$s files could be added, so it was not registered. Fix the unreadable files and try again.', 'devdome-safe-media-cleaner'),
+                number_format_i18n($added),
+                number_format_i18n($total)
+            );
+            devdsame_record_error('backup_incomplete', $job['message'], array('scope' => $scope, 'added' => $added, 'expected' => $total));
+            wp_delete_file($path);
+            return $job;
+        }
+        $registered = devdsame_backup_add(array(
             'id'         => (string) $job['created_at'] . '-' . substr(md5((string) $job['args']['file']), 0, 6),
             'scope'      => $scope,
             'file'       => wp_basename((string) $job['args']['file']),
@@ -331,6 +435,12 @@ function devdsame_tick_backup($job, $chunk)
             'bytes'      => is_file($path) ? (int) filesize($path) : 0,
             'created_at' => time(),
         ));
+        if (!$registered) {
+            $job['status'] = 'error';
+            $job['message'] = __('The backup was written but could not be registered (database write failed). It is on disk in the backups folder; run the backup again.', 'devdome-safe-media-cleaner');
+            devdsame_record_error('backup_register', $job['message'], array('scope' => $scope, 'file' => wp_basename($path)));
+            return $job;
+        }
         $job['status'] = 'completed';
         $job['message'] = __('Backup created.', 'devdome-safe-media-cleaner');
     }
@@ -341,8 +451,8 @@ function devdsame_tick_backup($job, $chunk)
 function devdsame_tick_backup_restore($job, $chunk)
 {
     $entry = devdsame_backup_get((string) ($job['args']['backup_id'] ?? ''));
-    $path = $entry ? devdsame_backups_dir() . '/' . wp_basename((string) $entry['file']) : '';
-    if (!$entry || !is_file($path) || !class_exists('ZipArchive')) {
+    $path = $entry ? devdsame_backups_path() . '/' . wp_basename((string) $entry['file']) : '';
+    if (!$entry || !is_file($path) || is_link(devdsame_backups_path()) || is_link($path) || !class_exists('ZipArchive')) {
         $job['status'] = 'error';
         $job['message'] = __('Backup file not found.', 'devdome-safe-media-cleaner');
         return $job;
@@ -359,6 +469,9 @@ function devdsame_tick_backup_restore($job, $chunk)
     $job['total'] = $total;
     $restored = array();
     $end = min($total, (int) $job['cursor'] + max(50, (int) $chunk));
+    // Largest entry we will buffer in memory: a quarter of memory_limit (unlimited = 256 MB), filterable down.
+    $mem = wp_convert_hr_to_bytes((string) ini_get('memory_limit'));
+    $entry_cap = (int) apply_filters('devdsame_max_backup_entry_bytes', min(256 * MB_IN_BYTES, $mem > 0 ? (int) floor($mem / 4) : 256 * MB_IN_BYTES));
 
     // Restore extension allowlist: image files only (what our own backups contain).
     // SVG is only restored when the site itself allows SVG uploads (it can carry scripts).
@@ -380,7 +493,8 @@ function devdsame_tick_backup_restore($job, $chunk)
             continue;
         }
         if (substr($name, -1) === '/') {
-            continue; // directory entry
+            $job['processed']--; // a folder entry is not a file: keep the "written back" count honest
+            continue;
         }
         // Entry guards for uploaded archives: allowlisted image extensions, no
         // hidden/dot files, and a per-entry uncompressed size cap so a crafted ZIP
@@ -398,15 +512,34 @@ function devdsame_tick_backup_restore($job, $chunk)
         }
         $target = $basedir . '/' . $name;
         $dir = dirname($target);
-        if (!is_dir($dir)) {
-            wp_mkdir_p($dir);
+        // The real path must stay inside uploads: folders are created only below an existing
+        // ancestor that resolves inside uploads (never through a link), and a link at the target
+        // is refused. An existing file is never written over (a restore puts back what is
+        // missing; it must not replace newer media that took the same name).
+        if (!devdsame_mkdir_inside_uploads($dir) || is_link($target) || devdsame_validate_in_uploads($target) === false) {
+            $job['errors']++;
+            continue;
+        }
+        if (file_exists($target)) {
+            $job['kept'] = (int) ($job['kept'] ?? 0) + 1;
+            continue;
+        }
+        // getFromIndex() buffers the whole entry: keep it well under the memory limit.
+        if ((int) $stat['size'] > $entry_cap) {
+            $job['errors']++;
+            continue;
         }
         $data = $zip->getFromIndex($i);
         if ($data === false) {
             $job['errors']++;
             continue;
         }
-        if (@file_put_contents($target, $data) === false) { // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- streaming restore of media files into uploads; WP_Filesystem direct method wraps the same call.
+        $written = @file_put_contents($target, $data, LOCK_EX); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- streaming restore of media files into uploads; WP_Filesystem direct method wraps the same call.
+        if ($written === false || $written !== strlen($data)) {
+            // A short write (disk full) leaves a truncated image: remove it, count the failure.
+            if (is_file($target)) {
+                wp_delete_file($target);
+            }
             $job['errors']++;
         } else {
             $restored[] = array($name, $target);
@@ -421,6 +554,14 @@ function devdsame_tick_backup_restore($job, $chunk)
     if ((string) $entry['scope'] === 'library' && $restored) {
         require_once ABSPATH . 'wp-admin/includes/image.php';
         $known = devdsame_known_attachment_files();
+        if ($known === null) {
+            // The files are written back, but without the library file set a restored image could be
+            // registered twice: stop here and say so instead of guessing.
+            $job['status'] = 'error';
+            $job['message'] = __('Files were written back, but the Media Library could not be checked (database read failed), so none were added to it. Run a scan to review them.', 'devdome-safe-media-cleaner');
+            devdsame_record_error('backup_restore', $job['message'], array('backup_id' => (string) ($job['args']['backup_id'] ?? '')));
+            return $job;
+        }
         foreach ($restored as $rp) {
             list($rel, $abs) = $rp;
             $key = strtolower((string) $rel);
@@ -436,11 +577,18 @@ function devdsame_tick_backup_restore($job, $chunk)
                 'post_title'     => sanitize_file_name((string) pathinfo($abs, PATHINFO_FILENAME)),
                 'post_status'    => 'inherit',
             ), $abs);
+            if (!$aid || is_wp_error($aid)) {
+                $job['errors']++; // on disk but not in the library: reported, never hidden
+                continue;
+            }
             if ($aid && !is_wp_error($aid)) {
                 // Exempts it from recent-upload protection: this is a restore, not a fresh upload.
                 update_post_meta($aid, '_devdsame_reregistered', 1);
                 wp_update_attachment_metadata($aid, wp_generate_attachment_metadata($aid, $abs));
-                devdsame_backup_register_scan_item((int) $aid, (string) $rel, (string) $abs);
+                if (!devdsame_backup_register_scan_item((int) $aid, (string) $rel, (string) $abs)) {
+                    // The image IS back in the library; only its scan row is missing until the next scan.
+                    devdsame_record_error('backup_restore', __('A restored image could not be added to the scan results (database write failed); it is in the Media Library and the next scan will list it.', 'devdome-safe-media-cleaner'), array('attachment_id' => (int) $aid));
+                }
                 $job['registered'] = (int) ($job['registered'] ?? 0) + 1;
                 if ((int) $job['registered'] % 3 === 0) {
                     // Live message while thumbnails generate — this is the slow part.
@@ -463,8 +611,26 @@ function devdsame_tick_backup_restore($job, $chunk)
         number_format_i18n($total)
     );
     if ($job['cursor'] >= $total) {
-        $job['status'] = 'completed';
-        $job['message'] = __('Backup restored.', 'devdome-safe-media-cleaner');
+        $written = (int) ($job['processed'] ?? 0) - (int) $job['errors'] - (int) ($job['kept'] ?? 0);
+        if ((int) $job['errors'] > 0) {
+            $job['status'] = 'error';
+            $job['message'] = sprintf(
+                /* translators: 1: files written, 2: files skipped as invalid or not writable, 3: files kept because they already existed */
+                __('Restore finished with problems: %1$s files written back, %2$s could not be restored (invalid entry or not writable), %3$s existing files kept.', 'devdome-safe-media-cleaner'),
+                number_format_i18n(max(0, $written)),
+                number_format_i18n((int) $job['errors']),
+                number_format_i18n((int) ($job['kept'] ?? 0))
+            );
+            devdsame_record_error('backup_restore', $job['message'], array('backup_id' => (string) ($job['args']['backup_id'] ?? ''), 'errors' => (int) $job['errors']));
+        } else {
+            $job['status'] = 'completed';
+            $job['message'] = sprintf(
+                /* translators: 1: files written back, 2: existing files kept */
+                __('Backup restored: %1$s files written back, %2$s already present and kept.', 'devdome-safe-media-cleaner'),
+                number_format_i18n(max(0, $written)),
+                number_format_i18n((int) ($job['kept'] ?? 0))
+            );
+        }
         if (!empty($job['registered']) && function_exists('devdsame_refresh_summary')) {
             devdsame_refresh_summary();
         }
@@ -481,12 +647,12 @@ function devdsame_backup_register_scan_item($aid, $rel, $abs)
     global $wpdb;
     $sid = function_exists('devdsame_latest_scan_id') ? (int) devdsame_latest_scan_id('library') : 0;
     if (!$sid) {
-        return; // never scanned — the first scan will pick it up.
+        return true; // never scanned — the first scan will pick it up.
     }
     $size = is_file($abs) ? (int) @filesize($abs) : 0;
     $dims = @getimagesize($abs);
     // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal scan_items insert.
-    $wpdb->insert($wpdb->prefix . 'devdsame_scan_items', array(
+    $inserted = $wpdb->insert($wpdb->prefix . 'devdsame_scan_items', array(
         'scan_id'          => $sid,
         'attachment_id'    => (int) $aid,
         'file_path'        => (string) $abs,
@@ -504,14 +670,18 @@ function devdsame_backup_register_scan_item($aid, $rel, $abs)
         'is_selected'      => 0,
         'created_at'       => current_time('mysql'),
     ), array('%d', '%d', '%s', '%s', '%s', '%d', '%d', '%d', '%s', '%s', '%s', '%d', '%s', '%d', '%d', '%s'));
+    if (!$inserted || $wpdb->last_error !== '') {
+        return false;
+    }
     // Bump the library-bytes roll-up (total image count is computed live by the summary).
     $scans = $wpdb->prefix . 'devdsame_scans';
     // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal scans roll-up bump; values bound via prepare.
-    $wpdb->query($wpdb->prepare(
+    $ok = $wpdb->query($wpdb->prepare(
         "UPDATE {$scans} SET total_library_bytes = total_library_bytes + %d WHERE id = %d",
         $size,
         $sid
     ));
+    return $ok !== false && $wpdb->last_error === '';
 }
 
 /* ----------------------------- chunked upload ---------------------------- */
@@ -526,6 +696,9 @@ function devdsame_backup_register_scan_item($aid, $rel, $abs)
  */
 function devdsame_rest_upload_backup(WP_REST_Request $request)
 {
+    if (devdsame_backups_dir() === '') {
+        return new WP_Error('devdsame_backup_dir', __('The backups folder could not be created or protected against public access.', 'devdome-safe-media-cleaner'), array('status' => 500));
+    }
     $scope = $request->get_param('scope') === 'disk' ? 'disk' : 'library';
     $name = sanitize_file_name((string) $request->get_param('name'));
     $done = (int) $request->get_param('done');
@@ -534,9 +707,13 @@ function devdsame_rest_upload_backup(WP_REST_Request $request)
     // Cancel: discard the assembled part-file and end the session.
     if ((int) $request->get_param('cancel') === 1) {
         if (preg_match('/^[a-z0-9]{8,32}$/', $upload_id)) {
-            $p = devdsame_backups_dir() . '/.part-' . $upload_id;
+            $p = devdsame_backups_path() . '/.part-' . $upload_id;
             if (is_file($p)) {
                 wp_delete_file($p);
+                clearstatcache(true, $p);
+                if (is_file($p)) {
+                    return new WP_Error('devdsame_cancel_failed', __('The partial upload could not be removed (check folder permissions on /wp-content/uploads).', 'devdome-safe-media-cleaner'), array('status' => 500));
+                }
             }
         }
         return rest_ensure_response(array('cancelled' => true));
@@ -548,7 +725,7 @@ function devdsame_rest_upload_backup(WP_REST_Request $request)
         return new WP_Error('devdsame_no_chunk', __('No data received.', 'devdome-safe-media-cleaner'), array('status' => 400));
     }
 
-    $dir = devdsame_backups_dir();
+    $dir = devdsame_backups_path();
 
     if ($upload_id === '') {
         $upload_id = strtolower(wp_generate_password(16, false, false));
@@ -563,9 +740,12 @@ function devdsame_rest_upload_backup(WP_REST_Request $request)
         return new WP_Error('devdsame_bad_upload', __('Invalid upload session.', 'devdome-safe-media-cleaner'), array('status' => 400));
     }
     $temp = $dir . '/.part-' . $upload_id;
+    if (is_link($temp)) {
+        return new WP_Error('devdsame_write_failed', __('Could not write to the backups folder.', 'devdome-safe-media-cleaner'), array('status' => 500));
+    }
 
     $bytes = file_get_contents($chunk['tmp_name']); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- local uploaded chunk, not a remote URL.
-    if ($bytes === false || @file_put_contents($temp, $bytes, FILE_APPEND) === false) { // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- append-assembly of a chunked upload.
+    if ($bytes === false || @file_put_contents($temp, $bytes, FILE_APPEND) !== strlen($bytes)) { // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- append-assembly of a chunked upload.
         return new WP_Error('devdsame_write_failed', __('Could not write to the backups folder.', 'devdome-safe-media-cleaner'), array('status' => 500));
     }
 
@@ -598,12 +778,12 @@ function devdsame_rest_upload_backup(WP_REST_Request $request)
         return new WP_Error('devdsame_too_many_files', __('The uploaded archive contains too many files.', 'devdome-safe-media-cleaner'), array('status' => 400));
     }
 
-    $final = $dir . '/upload-' . $scope . '-' . gmdate('Ymd-His') . '-' . ($name !== '' ? $name : 'backup.zip');
-    if (!@rename($temp, $final)) { // phpcs:ignore WordPress.WP.AlternativeFunctions.rename_rename -- atomic move inside our own guarded folder.
+    $final = $dir . '/upload-' . $scope . '-' . gmdate('Ymd-His') . '-' . wp_generate_password(6, false, false) . '-' . ($name !== '' ? $name : 'backup.zip');
+    if (file_exists($final) || is_link($final) || !@rename($temp, $final)) { // phpcs:ignore WordPress.WP.AlternativeFunctions.rename_rename -- atomic move inside our own guarded folder.
         wp_delete_file($temp);
         return new WP_Error('devdsame_move_failed', __('Could not finalize the uploaded backup.', 'devdome-safe-media-cleaner'), array('status' => 500));
     }
-    devdsame_backup_add(array(
+    $registered = devdsame_backup_add(array(
         'id'         => time() . '-' . substr(md5($final), 0, 6),
         'scope'      => $scope,
         'file'       => wp_basename($final),
@@ -611,6 +791,10 @@ function devdsame_rest_upload_backup(WP_REST_Request $request)
         'bytes'      => (int) filesize($final),
         'created_at' => time(),
     ));
+    if (!$registered) {
+        wp_delete_file($final);
+        return new WP_Error('devdsame_register_failed', __('The uploaded backup could not be registered (database write failed). Upload it again.', 'devdome-safe-media-cleaner'), array('status' => 500));
+    }
     return rest_ensure_response(array('upload_id' => $upload_id, 'complete' => true, 'files' => $files));
 }
 
@@ -625,7 +809,7 @@ function devdsame_handle_backup_download()
     check_admin_referer('devdsame_backup', '_mcbk');
     $id = isset($_GET['backup_id']) ? sanitize_text_field(wp_unslash($_GET['backup_id'])) : '';
     $entry = devdsame_backup_get($id);
-    $path = $entry ? devdsame_backups_dir() . '/' . wp_basename((string) $entry['file']) : '';
+    $path = $entry ? devdsame_backups_path() . '/' . wp_basename((string) $entry['file']) : '';
     if (!$entry || !is_file($path)) {
         wp_die(esc_html__('Backup file not found.', 'devdome-safe-media-cleaner'));
     }
@@ -657,8 +841,7 @@ function devdsame_handle_backup_actions()
     $notice = '';
 
     if ($action === 'delete' && $id !== '') {
-        devdsame_backup_remove($id);
-        $notice = 'deleted';
+        $notice = devdsame_backup_remove($id) ? 'deleted' : 'error';
     } elseif ($action === 'upload') {
         $notice = devdsame_handle_backup_upload_file();
     }
@@ -688,11 +871,17 @@ function devdsame_handle_backup_upload_file()
     if ((int) $f['size'] > $max_bytes) {
         return 'error';
     }
-    $dest = devdsame_backups_dir() . '/upload-' . $scope . '-' . gmdate('Ymd-His') . '-' . $name;
-    // Move the validated upload with the WP_Filesystem API (no direct move_uploaded_file()).
-    require_once ABSPATH . 'wp-admin/includes/file.php';
-    global $wp_filesystem;
-    if (!WP_Filesystem() || !$wp_filesystem || !$wp_filesystem->move($f['tmp_name'], $dest, true)) {
+    if (devdsame_backups_dir() === '') {
+        return 'error';
+    }
+    if (!class_exists('ZipArchive')) {
+        return 'error'; // an archive this host cannot open could never be restored: refuse it up front
+    }
+    $dest = devdsame_backups_path() . '/upload-' . $scope . '-' . gmdate('Ymd-His') . '-' . wp_generate_password(6, false, false) . '-' . $name;
+    // Move the validated upload with the direct WP_Filesystem method: the PHP temp folder is
+    // local, and an auto-selected FTP method could not reach it. Never replace an existing archive.
+    $fs = devdsame_fs();
+    if (!$fs || file_exists($dest) || is_link($dest) || !$fs->move($f['tmp_name'], $dest, false) || !is_file($dest)) {
         return 'error';
     }
     $files = 0;
@@ -712,7 +901,7 @@ function devdsame_handle_backup_upload_file()
             return 'error';
         }
     }
-    devdsame_backup_add(array(
+    $registered = devdsame_backup_add(array(
         'id'         => time() . '-' . substr(md5($dest), 0, 6),
         'scope'      => $scope,
         'file'       => wp_basename($dest),
@@ -720,5 +909,9 @@ function devdsame_handle_backup_upload_file()
         'bytes'      => (int) filesize($dest),
         'created_at' => time(),
     ));
+    if (!$registered) {
+        wp_delete_file($dest);
+        return 'error';
+    }
     return 'uploaded';
 }

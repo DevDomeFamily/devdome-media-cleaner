@@ -3,7 +3,7 @@
 Plugin Name: DevDome Safe Media Cleaner
 Plugin URI: https://devdome.com/
 Description: Safely find and remove unused WordPress images with visual review, confidence scoring, Recycle Bin and one-click restore. Part of the DevDome suite.
-Version: 1.0.10
+Version: 1.1.0
 Author: DevDome
 Author URI: https://devdome.com
 Text Domain: devdome-safe-media-cleaner
@@ -23,7 +23,7 @@ if (file_exists(__DIR__ . '/wporg-build.php')) {
     require __DIR__ . '/wporg-build.php';
 }
 
-define('DEVDSAME_VERSION', '1.0.10');
+define('DEVDSAME_VERSION', '1.1.0');
 define('DEVDSAME_DIR', plugin_dir_path(__FILE__));
 define('DEVDSAME_URL', plugin_dir_url(__FILE__));
 define('DEVDSAME_FILE', __FILE__);
@@ -74,6 +74,7 @@ require_once DEVDSAME_DIR . 'includes/backups.php';
 require_once DEVDSAME_DIR . 'includes/report.php';
 require_once DEVDSAME_DIR . 'includes/unlock.php';
 require_once DEVDSAME_DIR . 'includes/rest.php';
+require_once DEVDSAME_DIR . 'includes/abilities.php'; // WordPress Abilities API (6.9+), registers nothing on older versions
 require_once DEVDSAME_DIR . 'includes/cli.php';
 
 if (is_admin()) {

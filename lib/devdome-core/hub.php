@@ -99,6 +99,10 @@ function devdcorev1_hub_remote_catalog()
     if (is_array($cached)) {
         return $memo = $cached;
     }
+    if (!empty($GLOBALS['devdcorev1_catalog_cached_only'])) {
+        // a read-only agent ability (get-connection) never triggers the fetch or its cache write (Codex high round 13)
+        return array();
+    }
     $rows = array();
     $res = wp_remote_get(devdcorev1_hub_catalog_url(), array(
         'timeout'    => 4,
@@ -125,7 +129,7 @@ function devdcorev1_hub_sanitize_catalog_row($row)
 {
     $out = array();
     if (isset($row['name']))     { $out['name'] = sanitize_text_field(substr((string) $row['name'], 0, 60)); }
-    if (isset($row['desc']))     { $out['desc'] = esc_html(sanitize_text_field(substr((string) $row['desc'], 0, 200))); }
+    if (isset($row['desc']))     { $out['desc'] = sanitize_text_field(substr((string) $row['desc'], 0, 200)); } // stored plain, escaped once at render (DeepSeek core round 1: '&amp;' showed literally)
     if (isset($row['position'])) { $out['position'] = (int) $row['position']; }
     if (isset($row['version']) && preg_match('/^[0-9][0-9.]{0,11}$/', (string) $row['version'])) { $out['version'] = (string) $row['version']; }
     if (isset($row['listed']))   { $out['listed'] = !empty($row['listed']); }
@@ -451,6 +455,9 @@ function devdcorev1_hub_render_overview()
 /** Core's registry-driven Overview (the default v1 hub). */
 function devdcorev1_hub_render_default()
 {
+    if (!current_user_can('manage_options')) {
+        return; // the menu registers with this capability; the renderer checks it itself too (DeepSeek core round 1)
+    }
     $rows   = devdcorev1_hub_registry();
     $health = devdcorev1_hub_health();
 
@@ -528,10 +535,13 @@ function devdcorev1_hub_render_default()
         </div>
         <div class="ddh">
 
-            <?php // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only notice flag set by our own redirect; no data is processed.
-            if (isset($_GET['ddacct']) && 'disconnected' === $_GET['ddacct']) : ?>
+            <?php // Display-only notice flag set by our own redirect; no data is processed.
+            $ddacct = isset($_GET['ddacct']) ? sanitize_key(wp_unslash($_GET['ddacct'])) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only flag from our own PRG redirect
+            if ('disconnected' === $ddacct) : ?>
                 <div style="margin:0 0 14px;padding:11px 16px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#374151;font-weight:600;">Disconnected. This site is no longer linked to a DevDome account.</div>
-            <?php elseif (isset($_GET['ddacct']) && 'disconnected-local' === $_GET['ddacct']) : ?>
+            <?php elseif ('disconnect-failed' === $ddacct) : ?>
+                <div style="margin:0 0 14px;padding:11px 16px;border:1px solid #fecaca;border-radius:10px;background:#fef2f2;color:#991b1b;font-weight:600;">Not disconnected: the connection could not be cleared on this site (database error, or it verified as still connected). Nothing changed; try again, and check the database with your host if it keeps happening.</div>
+            <?php elseif ('disconnected-local' === $ddacct) : ?>
                 <div style="margin:0 0 14px;padding:11px 16px;border:1px solid #f59e0b;border-radius:10px;background:#fffbeb;color:#92400e;font-weight:600;">Disconnected on this site, but the DevDome account server could not be reached, so the account may still list this site. Remove it from your account at devdome.com, or reconnect and disconnect again.</div>
             <?php endif; ?>
             <?php
@@ -539,16 +549,16 @@ function devdcorev1_hub_render_default()
             // review 2026-09-11): these redirects carried dd_error and nothing displayed it, so a failed
             // connect looked like nothing happened. Display-only flags from our own redirect.
             // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-            $dd_err = isset($_GET['dd_error']) ? sanitize_key(wp_unslash($_GET['dd_error'])) : '';
+            $dd_err = isset($_GET['dd_error']) && is_string($_GET['dd_error']) ? sanitize_key(wp_unslash($_GET['dd_error'])) : '';
             // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-            $dd_why = isset($_GET['dd_why']) ? sanitize_text_field(wp_unslash($_GET['dd_why'])) : '';
+            $dd_why = isset($_GET['dd_why']) && is_string($_GET['dd_why']) ? sanitize_text_field(wp_unslash($_GET['dd_why'])) : '';
             // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-            $dd_retry = isset($_GET['dd_retry']) ? sanitize_key(wp_unslash($_GET['dd_retry'])) : '';
+            $dd_retry = isset($_GET['dd_retry']) && is_string($_GET['dd_retry']) ? sanitize_key(wp_unslash($_GET['dd_retry'])) : '';
             $dd_retry_url = '' !== $dd_retry ? add_query_arg(array('page' => DEVDCOREV1_TOOLS_MENU_SLUG, 'dd_connect' => 1, 'rt' => $dd_retry), admin_url('admin.php')) : '';
             $dd_msgs = array(
-                'start'   => 'Could not start the connection: this site could not reach the DevDome server. Check that outbound HTTPS requests are allowed on this host, then press Connect again.',
+                'start'   => 'Could not start the connection. The detail below says why (a blocked outbound request, or a callback address DevDome does not accept). Fix that, then press Connect again.',
                 'expired' => 'This connect link has expired or was already used. Press Connect again to start a fresh one (it stays valid for 10 minutes).',
-                'verify'  => 'DevDome authorized this site, but the final confirmation from this server failed. Press Connect again; if it keeps failing, send the detail below to support@devdome.com.',
+                'verify'  => 'DevDome did not confirm the connection for this site. Press Try again or Connect again; if it keeps failing, send the detail below to support@devdome.com.',
             );
             if ('' !== $dd_err && isset($dd_msgs[$dd_err])) : ?>
                 <div style="margin:0 0 14px;padding:11px 16px;border:1px solid #ef4444;border-radius:10px;background:#fef2f2;color:#991b1b;font-weight:600;">
@@ -619,15 +629,17 @@ function devdcorev1_hub_render_default()
                     $upd_url  = ($pf && $new_ver !== '') ? wp_nonce_url(self_admin_url('update.php?action=upgrade-plugin&plugin=' . rawurlencode($pf)), 'upgrade-plugin_' . $pf) : '';
                     ?>
                     <?php if ($has) : ?><details class="ddh-row"><summary class="ddh-rsum"><?php else : ?><div class="ddh-row"><div class="ddh-rsum"><?php endif; ?>
-                        <span class="ddh-logo"><?php echo devdcorev1_hub_logo_svg($r['slug']); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></span>
+                        <span class="ddh-logo"><?php echo wp_kses(devdcorev1_hub_logo_svg($r['slug']), devdcorev1_hub_svg_kses()); ?></span>
                         <div class="ddh-rid"><div class="ddh-rmain"><div class="ddh-rline">
                             <div class="ddh-rname"><?php echo esc_html(strpos($r['name'], 'DevDome') === 0 ? $r['name'] : 'DevDome ' . $r['name']); ?></div>
                             <div class="ddh-rver">v<?php echo esc_html($r['version'] ? $r['version'] : '1.0'); ?><?php if ($new_ver !== '') : ?> <span class="ddh-up">&rarr; v<?php echo esc_html($new_ver); ?></span><?php if ($upd_url) : ?><a class="ddh-upbtn" href="<?php echo esc_url($upd_url); ?>" data-dd-plugin="<?php echo esc_attr($pf); ?>" data-dd-ver="<?php echo esc_attr($new_ver); ?>" data-dd-nonce="<?php echo esc_attr(wp_create_nonce('updates')); ?>" onclick="event.stopPropagation()"><?php echo $ic_update; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>Update</a><?php endif; ?><?php endif; ?></div>
                         </div><?php if (!empty($r['desc'])) : ?><div class="ddh-rsub"><?php echo esc_html(wp_strip_all_tags($r['desc'])); ?></div><?php endif; ?></div></div>
                         <?php if ($has) : ?>
                             <span class="ddh-st warn"><span class="dot"></span><?php echo (int) count($r_issues); ?> Issue<?php echo esc_html(count($r_issues) === 1 ? '' : 's'); ?><span class="caret"><?php echo $ic_caret; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></span></span>
-                        <?php else : ?>
+                        <?php elseif (!empty($r['health']) && is_callable($r['health'])) : ?>
                             <span class="ddh-st ok"><?php echo $ic_check; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>No Issues</span>
+                        <?php else : ?>
+                            <span class="ddh-st ok" title="This plugin does not report health checks to the dashboard yet.">Not monitored</span><?php // no health callback = no clean bill (DeepSeek core round 1) ?>
                         <?php endif; ?>
                         <?php if (!empty($r['get_url'])) : ?><a class="ddh-btn ddh-btn-ghost ddh-docs" href="<?php echo esc_url($r['get_url']); ?>" target="_blank" rel="noopener" onclick="event.stopPropagation()">Docs</a><?php endif; ?>
                         <?php if ($open_url) : ?><a class="ddh-btn ddh-btn-ghost" href="<?php echo esc_url($open_url); ?>" onclick="event.stopPropagation()">Open <?php echo $ic_arrow; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></a><?php endif; ?>
@@ -650,7 +662,7 @@ function devdcorev1_hub_render_default()
                         $act_url = ($pf && $can_deactivate) ? wp_nonce_url(add_query_arg(array('page' => DEVDCOREV1_TOOLS_MENU_SLUG, 'devdcorev1_hub_activate' => $r['slug']), admin_url('admin.php')), 'devdcorev1_hub_activate_' . $r['slug']) : '';
                         ?>
                         <div class="ddh-row inact"><div class="ddh-rsum">
-                            <span class="ddh-logo"><?php echo devdcorev1_hub_logo_svg($r['slug']); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></span>
+                            <span class="ddh-logo"><?php echo wp_kses(devdcorev1_hub_logo_svg($r['slug']), devdcorev1_hub_svg_kses()); ?></span>
                             <div class="ddh-rid"><div class="ddh-rmain"><div class="ddh-rline"><div class="ddh-rname"><?php echo esc_html(strpos($r['name'], 'DevDome') === 0 ? $r['name'] : 'DevDome ' . $r['name']); ?></div><?php if ($r['version']) : ?><div class="ddh-rver">v<?php echo esc_html($r['version']); ?></div><?php endif; ?></div><?php if (!empty($r['desc'])) : ?><div class="ddh-rsub"><?php echo esc_html(wp_strip_all_tags($r['desc'])); ?></div><?php endif; ?></div></div>
                             <span class="ddh-st off"><span class="odot"></span>Inactive</span>
                             <?php if (!empty($r['get_url'])) : ?><a class="ddh-btn ddh-btn-ghost ddh-docs" href="<?php echo esc_url($r['get_url']); ?>" target="_blank" rel="noopener" onclick="event.stopPropagation()">Docs</a><?php endif; ?>
@@ -666,7 +678,7 @@ function devdcorev1_hub_render_default()
                 <div class="ddh-list">
                     <?php foreach ($available as $r) : ?>
                         <div class="ddh-row avail"><div class="ddh-rsum">
-                            <span class="ddh-logo"><?php echo devdcorev1_hub_logo_svg($r['slug']); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></span>
+                            <span class="ddh-logo"><?php echo wp_kses(devdcorev1_hub_logo_svg($r['slug']), devdcorev1_hub_svg_kses()); ?></span>
                             <div class="ddh-rid"><div class="ddh-rmain"><div class="ddh-rline"><div class="ddh-rname"><?php echo esc_html(strpos($r['name'], 'DevDome') === 0 ? $r['name'] : 'DevDome ' . $r['name']); ?></div><?php if (!empty($r['version'])) : ?><div class="ddh-rver">v<?php echo esc_html($r['version']); ?></div><?php endif; ?></div><div class="ddh-rsub"><?php echo esc_html(wp_strip_all_tags($r['desc'])); ?></div></div></div>
                             <span class="ddh-st off"><span class="odot"></span>Not installed</span>
                             <?php if (!empty($r['get_url'])) : ?><a class="ddh-btn ddh-btn-ghost ddh-docs" href="<?php echo esc_url($r['get_url']); ?>" target="_blank" rel="noopener" onclick="event.stopPropagation()">Docs</a><?php endif; ?>
@@ -929,7 +941,19 @@ function devdcorev1_hub_inline_js()
 JS;
 }
 
-/** Per-plugin logo (white glyph on the blue tile) resolved by slug keyword. Hardcoded allowlist -> safe to echo. */
+/** wp_kses() allowlist for the hub's inline SVG glyphs (bundled or from the catalog cache): shapes + presentation attributes only. */
+function devdcorev1_hub_svg_kses()
+{
+    $attrs = array('d' => true, 'cx' => true, 'cy' => true, 'r' => true, 'rx' => true, 'ry' => true, 'x' => true, 'y' => true,
+        'x1' => true, 'y1' => true, 'x2' => true, 'y2' => true, 'width' => true, 'height' => true, 'points' => true,
+        'fill' => true, 'stroke' => true, 'stroke-width' => true, 'stroke-linecap' => true, 'stroke-linejoin' => true);
+    return array(
+        'svg'  => array('viewbox' => true, 'width' => true, 'height' => true, 'fill' => true, 'stroke' => true, 'stroke-width' => true, 'stroke-linecap' => true, 'stroke-linejoin' => true, 'aria-hidden' => true, 'focusable' => true),
+        'path' => $attrs, 'circle' => $attrs, 'rect' => $attrs, 'line' => $attrs, 'polyline' => $attrs, 'polygon' => $attrs, 'ellipse' => $attrs,
+    );
+}
+
+/** Per-plugin logo (white glyph on the blue tile) resolved by slug keyword: a catalog-cache glyph (kses'd on download) or a bundled one. Escaped at output with devdcorev1_hub_svg_kses(). */
 function devdcorev1_hub_logo_svg($slug)
 {
     $s = (string) $slug;
@@ -954,7 +978,7 @@ function devdcorev1_hub_logo_svg($slug)
 /** Activate an installed DevDome plugin from the dashboard and return to it (no trip to plugins.php). */
 function devdcorev1_hub_handle_activate()
 {
-    if (empty($_GET['devdcorev1_hub_activate'])) {
+    if (empty($_GET['devdcorev1_hub_activate']) || !is_string($_GET['devdcorev1_hub_activate'])) {
         return;
     }
     $slug = sanitize_key(wp_unslash($_GET['devdcorev1_hub_activate']));
@@ -974,7 +998,7 @@ function devdcorev1_hub_handle_activate()
         require_once ABSPATH . 'wp-admin/includes/plugin.php';
         if (file_exists(WP_PLUGIN_DIR . '/' . $file)) {
             $act = activate_plugin($file);
-            $result = is_wp_error($act) ? 'fail' : 'activated';
+            $result = (is_wp_error($act) || !is_plugin_active($file)) ? 'fail' : 'activated'; // read back, never assumed (DeepSeek core round 1)
         }
     }
     wp_safe_redirect(add_query_arg(

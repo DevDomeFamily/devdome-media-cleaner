@@ -65,6 +65,7 @@ function devdsame_refresh_summary($scan_id = 0, $score = null)
 
     // Start from the current snapshot so the side NOT covered by this refresh is preserved.
     $summary = devdsame_hub_summary();
+    $failed = false;
 
     $sides = array();
     if ($scan_id) {
@@ -100,6 +101,7 @@ function devdsame_refresh_summary($scan_id = 0, $score = null)
             "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = 'attachment' AND post_mime_type LIKE %s",
             $wpdb->esc_like('image/') . '%'
         ));
+        $failed = $failed || $wpdb->last_error !== '';
         $summary['used_count']          = (int) $row['used_count'];
         // Live count — cleaning flips items to 'trashed', so this drops without a rescan.
         // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal scan_items count; scan_id bound via prepare.
@@ -107,6 +109,7 @@ function devdsame_refresh_summary($scan_id = 0, $score = null)
             "SELECT COUNT(*) FROM {$items} WHERE scan_id = %d AND status = 'unused'",
             $sid
         ));
+        $failed = $failed || $wpdb->last_error !== '';
         $summary['uncertain_count']     = (int) $row['uncertain_count'];
         $summary['missing_count']       = (int) $row['missing_count'];
         $summary['duplicate_count']     = (int) $row['duplicate_count'];
@@ -117,6 +120,7 @@ function devdsame_refresh_summary($scan_id = 0, $score = null)
             "SELECT COALESCE(SUM(file_size), 0) FROM {$items} WHERE scan_id = %d AND status IN ('unused', 'duplicate')",
             $sid
         ));
+        $failed = $failed || $wpdb->last_error !== '';
     }
 
     if (!empty($sides['disk'])) {
@@ -130,15 +134,23 @@ function devdsame_refresh_summary($scan_id = 0, $score = null)
             "SELECT COUNT(*) FROM {$items} WHERE scan_id = %d AND status = 'orphan'",
             $sid
         ));
+        $failed = $failed || $wpdb->last_error !== '';
         $summary['disk_images_count'] = devdsame_get_int('disk_images_scanned', 0);
         $summary['disk_images_bytes'] = devdsame_get_int('disk_images_bytes', 0);
+        $failed = $failed || !empty($GLOBALS['devdsame_db_failed']);
         // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal scan_items aggregate; scan_id bound via prepare.
         $summary['orphan_bytes'] = (int) $wpdb->get_var($wpdb->prepare(
             "SELECT COALESCE(SUM(file_size), 0) FROM {$items} WHERE scan_id = %d AND status = 'orphan'",
             $sid
         ));
+        $failed = $failed || $wpdb->last_error !== '';
     }
 
+    if ($failed) {
+        // A failed count would persist a clean-looking site: keep the previous snapshot instead.
+        devdsame_record_error('summary_db', __('The media summary could not be refreshed (database read failed); the previous numbers are kept.', 'devdome-safe-media-cleaner'), array());
+        return devdsame_hub_summary();
+    }
     $summary['possible_cleanup_bytes'] = (int) $summary['library_cleanup_bytes'] + (int) $summary['orphan_bytes'];
 
     // Cleanliness score = Media Library health only (the Disk Cleaner reports its own bytes).
@@ -278,10 +290,21 @@ function devdsame_scan_folders($scan_id)
     global $wpdb;
     $items = $wpdb->prefix . 'devdsame_scan_items';
     // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal scan_items facet read; scan_id bound via prepare.
-    $rows = $wpdb->get_col($wpdb->prepare(
-        "SELECT DISTINCT file_url FROM {$items} WHERE scan_id = %d AND file_url <> '' LIMIT 5000",
-        (int) $scan_id
-    ));
+    // Every distinct URL, read in keyed pages (a flat LIMIT hid the folders of a big scan).
+    $rows = array();
+    $after = '';
+    do {
+        $page = $wpdb->get_col($wpdb->prepare(
+            "SELECT DISTINCT file_url FROM {$items} WHERE scan_id = %d AND file_url <> '' AND file_url > %s ORDER BY file_url ASC LIMIT 5000",
+            (int) $scan_id,
+            $after
+        ));
+        if ($wpdb->last_error !== '' || !$page) {
+            break;
+        }
+        $rows = array_merge($rows, $page);
+        $after = (string) end($page);
+    } while (count($page) === 5000);
     $base = devdsame_uploads_baseurl();
     $folders = array();
     foreach ((array) $rows as $url) {
@@ -408,6 +431,10 @@ function devdsame_export_scan($scan_id, $format)
             $last,
             500
         ), ARRAY_A);
+        if ($wpdb->last_error !== '') {
+            echo "\nEXPORT INCOMPLETE: a database read failed; the rows above are not the whole result.\n";
+            exit;
+        }
         if (!$rows) {
             break;
         }
@@ -459,6 +486,10 @@ function devdsame_export_trash($format)
     do {
         // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- chunked export read over internal trash_items; bounds bound via prepare.
         $rows = $wpdb->get_results($wpdb->prepare("SELECT * FROM {$ti} WHERE id > %d ORDER BY id ASC LIMIT %d", $last, 500), ARRAY_A);
+        if ($wpdb->last_error !== '') {
+            echo "\nEXPORT INCOMPLETE: a database read failed; the rows above are not the whole result.\n";
+            exit;
+        }
         if (!$rows) {
             break;
         }
@@ -511,7 +542,9 @@ function devdsame_scheduled_scan_dispatch()
     if ($job && in_array($job['status'], array('running', 'paused'), true)) {
         return;
     }
-    devdsame_update_setting('last_scheduled_scan_at', time());
-    devdsame_start_job('scan');
+    // Stamp the run only when a scan really started: a refused start must not skip a whole interval.
+    if (!is_wp_error(devdsame_start_job('scan'))) {
+        devdsame_update_setting('last_scheduled_scan_at', time());
+    }
 }
 add_action('devdsame_scheduled_scan', 'devdsame_scheduled_scan_dispatch');

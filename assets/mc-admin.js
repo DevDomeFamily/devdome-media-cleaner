@@ -9,7 +9,12 @@
     var I18N = CFG.i18n || {};
 
     function api(path, method, body) {
-        return fetch(CFG.root + path, {
+        // The REST root can be the plain-permalink form (index.php?rest_route=/devdsame/v1/): a path with
+        // its own query string must then join with & or the route is not found (grid and peek 404ed).
+        var q = path.indexOf('?');
+        var url = CFG.root + (q === -1 ? path : path.slice(0, q));
+        if (q !== -1) { url += (url.indexOf('?') !== -1 ? '&' : '?') + path.slice(q + 1); }
+        return fetch(url, {
             method: method || 'GET',
             headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': CFG.nonce },
             credentials: 'same-origin',
@@ -209,23 +214,43 @@
     document.querySelectorAll('.mc-pause-btn').forEach(function (pauseBtn) {
         pauseBtn.addEventListener('click', function () {
             var paused = pauseBtn.getAttribute('data-paused') === '1';
-            // Optimistic flip — the server honours it at the next chunk boundary.
-            pauseBtn.setAttribute('data-paused', paused ? '0' : '1');
-            pauseBtn.textContent = paused ? (I18N.pause || 'Pause') : (I18N.resume || 'Resume');
-            if (!paused) {
-                document.querySelectorAll('.mc-progress-msg').forEach(function (m) { m.textContent = I18N.pausing || 'Pausing after the current batch...'; });
-            }
-            api('job-control', 'POST', { action: paused ? 'resume' : 'pause' });
+            // The button flips only once the server confirmed; a refused request keeps the real state.
+            pauseBtn.disabled = true;
+            api('job-control', 'POST', { action: paused ? 'resume' : 'pause' }).then(function (res) {
+                pauseBtn.disabled = false;
+                var p = res.data || {};
+                if (!res.ok || !p.status) {
+                    alert((p && p.message) || 'The job could not be ' + (paused ? 'resumed' : 'paused') + '. It is still ' + (paused ? 'paused' : 'running') + '.');
+                    return;
+                }
+                var nowPaused = p.status === 'paused';
+                pauseBtn.setAttribute('data-paused', nowPaused ? '1' : '0');
+                pauseBtn.textContent = nowPaused ? (I18N.resume || 'Resume') : (I18N.pause || 'Pause');
+                if (nowPaused) {
+                    document.querySelectorAll('.mc-progress-msg').forEach(function (m) { m.textContent = I18N.pausing || 'Pausing after the current batch...'; });
+                }
+            }).catch(function () {
+                pauseBtn.disabled = false;
+                alert('The job could not be ' + (paused ? 'resumed' : 'paused') + ' (network error).');
+            });
         });
     });
     document.querySelectorAll('.mc-cancel-btn').forEach(function (cancelBtn) {
         cancelBtn.addEventListener('click', function () {
-            // INSTANT: hide first, tell the server in the background.
+            // Tell the server, then hide once it confirmed; a refused cancel keeps the live bar.
             cancelled = true;
             stopPolling();
-            showProgress(false);
-            setJobButtons(false);
-            api('job-control', 'POST', { action: 'cancel' }).then(function () {
+            cancelBtn.disabled = true;
+            api('job-control', 'POST', { action: 'cancel' }).then(function (res) {
+                cancelBtn.disabled = false;
+                if (!res.ok) {
+                    cancelled = false;
+                    alert((res.data && res.data.message) || 'The job could not be cancelled. It is still running.');
+                    poll(function () { location.reload(); });
+                    return;
+                }
+                showProgress(false);
+                setJobButtons(false);
                 // A cancelled clean rolls itself back (all-or-nothing). The rollback is a new
                 // 'restore' job — it can appear a few seconds later (an in-flight chunk defers
                 // it until its last files landed), so retry, then drive + SHOW it.
@@ -246,6 +271,12 @@
                     }).catch(function () { if (++tries < 20) { setTimeout(pickup, 1000); } });
                 };
                 pickup();
+            }).catch(function () {
+                // Network failure: nothing was cancelled, keep showing the live job.
+                cancelBtn.disabled = false;
+                cancelled = false;
+                alert('The job could not be cancelled (network error). It is still running.');
+                poll(function () { location.reload(); });
             });
         });
     });
@@ -336,13 +367,28 @@
             e.preventDefault();
             var fd = new FormData(settingsForm);
             fd.append('devdsame_settings_save', '1');
-            // Feedback the instant the button is pressed — the POST finishes in the background.
+            // "Saved." only once the server said so (its PRG redirect carries mc_saved=1;
+            // a failed write comes back as mc_err=settings, a lost nonce as an error page).
             var note = document.getElementById('mc-saved-note');
-            if (note) {
-                note.style.display = 'inline';
-                setTimeout(function () { note.style.display = 'none'; }, 2600);
-            }
-            fetch(window.location.href, { method: 'POST', body: fd, credentials: 'same-origin' });
+            var submit = settingsForm.querySelector('button[type="submit"], input[type="submit"]');
+            if (submit) { submit.disabled = true; }
+            var fail = function (msg) {
+                if (submit) { submit.disabled = false; }
+                alert(msg);
+            };
+            fetch(window.location.href, { method: 'POST', body: fd, credentials: 'same-origin', redirect: 'follow' }).then(function (r) {
+                if (submit) { submit.disabled = false; }
+                if (r.ok && /[?&]mc_saved=1(&|$)/.test(r.url || '')) {
+                    if (note) {
+                        note.style.display = 'inline';
+                        setTimeout(function () { note.style.display = 'none'; }, 2600);
+                    }
+                    return;
+                }
+                fail(/[?&]mc_err=settings(&|$)/.test(r.url || '')
+                    ? 'Some settings could not be saved (database write failed). Reload the page to see what is stored.'
+                    : 'The settings could not be saved (your session may have expired). Reload the page and try again.');
+            }).catch(function () { fail('The settings could not be saved (network error). Try again.'); });
         });
     }
 
@@ -391,19 +437,35 @@
             e.preventDefault();
             if (!confirm(I18N.confirmDeleteBackup || 'Delete this backup file? This cannot be undone.')) { return; }
             var tr = form.closest('tr');
-            if (tr) { tr.style.display = 'none'; }
             var fd = new FormData(form);
             var btn = form.querySelector('button[name="backup_id"]');
-            if (btn) { fd.append('backup_id', btn.value); } // submit-button values are not in FormData
-            fetch(window.location.href, { method: 'POST', body: fd, credentials: 'same-origin' });
-            var panel = document.querySelector('[data-dd-panel="backup"] .max-w-5xl');
-            if (panel && !panel.querySelector('.mc-bk-flash')) {
+            if (btn) { fd.append('backup_id', btn.value); btn.disabled = true; } // submit-button values are not in FormData
+            var flash = function (text, cls) {
+                var panel = document.querySelector('[data-dd-panel="backup"] .max-w-5xl');
+                if (!panel) { return; }
+                var old = panel.querySelector('.mc-bk-flash');
+                if (old) { old.remove(); }
                 var b = document.createElement('div');
-                b.className = 'dd-banner dd-banner-error mc-bk-flash';
+                b.className = 'dd-banner ' + cls + ' mc-bk-flash';
                 b.style.marginBottom = '16px';
-                b.textContent = I18N.backupDeleted || 'Backup deleted.';
+                b.textContent = text;
                 panel.insertBefore(b, panel.firstChild);
-            }
+            };
+            // The row goes only after the server confirmed the zip is gone (the PRG redirect
+            // carries mc_bk=deleted); a refused delete keeps the row and says so.
+            fetch(window.location.href, { method: 'POST', body: fd, credentials: 'same-origin', redirect: 'follow' }).then(function (r) {
+                if (btn) { btn.disabled = false; }
+                var ok = r.ok && /[?&]mc_bk=deleted(&|$)/.test(r.url || '');
+                if (ok) {
+                    if (tr) { tr.style.display = 'none'; }
+                    flash(I18N.backupDeleted || 'Backup deleted.', 'dd-banner-error');
+                } else {
+                    flash(I18N.backupDeleteFailed || 'The backup could not be deleted. It is still listed.', 'dd-banner-error');
+                }
+            }).catch(function () {
+                if (btn) { btn.disabled = false; }
+                flash(I18N.backupDeleteFailed || 'The backup could not be deleted. It is still listed.', 'dd-banner-error');
+            });
         });
     });
     // Flash notices come from PRG query params — strip them from the URL immediately after
@@ -574,8 +636,17 @@
             if (searchIn && searchIn.value.trim() !== '') { params.set('search', searchIn.value.trim()); }
             grid.innerHTML = '<div class="dd-hint" style="padding:20px;">' + (I18N.scanning || 'Loading...') + '</div>';
             api('scan-results?' + params.toString()).then(function (res) {
+                if (!res.ok) { loadError((res.data && res.data.message) || I18N.loadFailed || 'The review list could not be loaded.'); return; }
                 render(res.data || {});
-            });
+            }, function () { loadError(I18N.loadFailed || 'The review list could not be loaded.'); });
+        }
+
+        // A read that failed is shown as a failure: an empty grid would read as "nothing to review".
+        function loadError(message) {
+            grid.innerHTML = '<div class="dd-banner dd-banner-error" style="margin:12px 0;">' + esc(message) + '</div>';
+            empty.style.display = 'none';
+            pager.innerHTML = '';
+            if (pageBar) { pageBar.style.display = 'none'; }
         }
 
         function badge(item) {
@@ -588,7 +659,8 @@
             return '<span class="mc-badge ' + cls + '">' + esc(txt) + '</span>';
         }
 
-        function esc(s) { var d = document.createElement('div'); d.textContent = (s === null || s === undefined) ? '' : String(s); return d.innerHTML; }
+        // Safe for text AND for double/single-quoted attributes (file names and URLs come from the server).
+        function esc(s) { return ((s === null || s === undefined) ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 
         function render(data) {
             grid.innerHTML = '';
@@ -610,8 +682,8 @@
                     '<div class="mc-thumb">' + (it.thumb ? '<img loading="lazy" src="' + esc(it.thumb) + '" alt="">' : '<span class="dashicons dashicons-format-image" style="font-size:36px;color:#cbd5e1;"></span>') + '</div>' +
                     '<div class="mc-meta">' +
                         '<div class="mc-fn" title="' + esc(it.filename) + '">' + esc(it.filename) + '</div>' +
-                        '<div class="mc-sub">' + esc(it.size_h) + (it.width ? ' · ' + it.width + '×' + it.height : '') + '</div>' +
-                        '<div class="mc-sub">' + esc((it.date || '').substring(0, 10)) + ' · #' + it.attachment_id + '</div>' +
+                        '<div class="mc-sub">' + esc(it.size_h) + (it.width ? ' · ' + esc(it.width) + '×' + esc(it.height) : '') + '</div>' +
+                        '<div class="mc-sub">' + esc((it.date || '').substring(0, 10)) + ' · #' + esc(it.attachment_id) + '</div>' +
                         (badge(it) ? '<div style="margin-top:6px;">' + badge(it) + '</div>' : '') +
                         (reasons ? '<div class="mc-reasons">' + reasons + '</div>' : '') +
                     '</div>' +
@@ -748,8 +820,9 @@
         if (trashBtn) {
             trashBtn.addEventListener('click', function () {
                 var ids = selectedItemIds();
-                if (!ids.length) { alert(I18N.noResults ? 'Select images first.' : 'Select images first.'); return; }
-                if (!confirm(I18N.confirmTrash || 'Move to Recycle Bin?')) { return; }
+                if (!ids.length) { alert(I18N.selectFirst || 'Select images first.'); return; }
+                var countMsg = (I18N.confirmTrashCount || '%d selected images will move (including any selected on other pages).').replace('%d', String(ids.length));
+                if (!confirm(countMsg + '\n' + (I18N.confirmTrash || 'Move to Recycle Bin?'))) { return; }
                 trashBtn.disabled = true;
                 api('trash', 'POST', { item_ids: ids }).then(function (res) {
                     if (!res.ok) { alert((res.data && res.data.message) || 'Could not start.'); trashBtn.disabled = false; return; }
@@ -765,8 +838,13 @@
         }
         function protectAction(mode) {
             var ids = selectedAttachIds();
-            if (!ids.length) { alert('Select images first.'); return; }
-            api('protect', 'POST', { attachment_ids: ids, mode: mode }).then(function () { selected = {}; load(); });
+            // Orphan files have no Media Library record, so there is nothing to mark: say so instead of "select first".
+            if (!ids.length) { alert(currentStatus() === 'orphan' ? (I18N.orphanNoProtect || 'Protect and Ignore apply to Media Library images; orphan files have no library record.') : (I18N.selectFirst || 'Select images first.')); return; }
+            api('protect', 'POST', { attachment_ids: ids, mode: mode }).then(function (res) {
+                if (!res.ok) { alert((res.data && res.data.message) || 'The images could not be marked. Nothing changed.'); return; }
+                selected = {};
+                load();
+            }).catch(function () { alert('The images could not be marked (network error). Nothing changed.'); });
         }
         var protectBtn = document.getElementById('mc-protect-btn');
         if (protectBtn) { protectBtn.addEventListener('click', function () { protectAction('protect'); }); }

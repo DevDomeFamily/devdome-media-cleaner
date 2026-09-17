@@ -62,13 +62,14 @@ function devdsame_attachment_files($attachment_id)
         $paths[] = $basedir . '/' . ltrim($meta['file'], '/');
     }
 
-    // Unscaled original (WP 5.3+ -scaled handling).
-    if (!empty($meta['original_image']) && $subdir !== '') {
+    // Unscaled original (WP 5.3+ -scaled handling). $subdir is '' for uploads kept in the root
+    // folder (year/month folders off): the variants sit next to the file there too.
+    if (!empty($meta['original_image']) && !empty($meta['file'])) {
         $paths[] = $basedir . '/' . $subdir . $meta['original_image'];
     }
 
     // Every registered intermediate size.
-    if (!empty($meta['sizes']) && is_array($meta['sizes']) && $subdir !== '') {
+    if (!empty($meta['sizes']) && is_array($meta['sizes']) && !empty($meta['file'])) {
         foreach ($meta['sizes'] as $size) {
             if (!empty($size['file'])) {
                 $paths[] = $basedir . '/' . $subdir . $size['file'];
@@ -79,7 +80,7 @@ function devdsame_attachment_files($attachment_id)
     // Edited-image derivatives left behind by the WP image editor: same dir, name with
     // an -eTIMESTAMP token. Discover them on disk so they tie back to this attachment and
     // are never mis-flagged as orphans.
-    if ($subdir !== '' && !empty($meta['file'])) {
+    if (!empty($meta['file'])) {
         $abs_dir = $basedir . '/' . untrailingslashit($subdir);
         $name = wp_basename($meta['file']);
         $stem = preg_replace('/\.[^.]+$/', '', $name);
@@ -282,6 +283,47 @@ function devdsame_validate_in_uploads($path)
         return false;
     }
     return $real;
+}
+
+/**
+ * A chunked read failed ($wpdb->last_error after a get_results/get_col). Remembered for the
+ * running scan so a partial reference sweep is never mistaken for "nothing references it", and
+ * recorded once in the error log. devdsame_build_used_set() clears it before it starts.
+ */
+function devdsame_db_read_failed()
+{
+    global $wpdb;
+    if (empty($GLOBALS['devdsame_db_failed'])) {
+        $GLOBALS['devdsame_db_failed'] = (string) $wpdb->last_error !== '' ? (string) $wpdb->last_error : 'database read failed';
+        if (function_exists('devdsame_record_error')) {
+            devdsame_record_error('db_read', __('A database read failed during the scan; unverified images were marked uncertain instead of unused.', 'devdome-safe-media-cleaner'), array('error' => substr($GLOBALS['devdsame_db_failed'], 0, 300)));
+        }
+    }
+}
+
+/**
+ * Create a folder for a restore target only when its nearest EXISTING ancestor already resolves
+ * inside uploads and is not a link (a missing subtree below a link would otherwise be created
+ * wherever the link points). Returns true when $dir exists inside uploads afterwards.
+ */
+function devdsame_mkdir_inside_uploads($dir)
+{
+    $dir = rtrim(str_replace('\\', '/', (string) $dir), '/');
+    $probe = $dir;
+    while ($probe !== '' && !file_exists($probe)) {
+        $parent = dirname($probe);
+        if ($parent === $probe) {
+            return false;
+        }
+        $probe = $parent;
+    }
+    if ($probe === '' || is_link($probe) || !is_dir($probe) || devdsame_validate_in_uploads($probe) === false) {
+        return false;
+    }
+    if (!is_dir($dir)) {
+        wp_mkdir_p($dir);
+    }
+    return is_dir($dir) && !is_link($dir) && devdsame_validate_in_uploads($dir) !== false;
 }
 
 /** Compute an md5 hash of a file's bytes (cheap, collision-grouped with size+dims later). */
