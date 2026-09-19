@@ -1,0 +1,28 @@
+{
+    "name": "devdome/devdome-media-cleaner",
+    "description": "Free WordPress media cleaner: find and remove unused images, orphan files and duplicate media with a Recycle Bin. Free alternative to Media Cleaner Pro, Media Deduper and Image Cleanup.",
+    "type": "wordpress-plugin",
+    "license": "GPL-2.0-or-later",
+    "homepage": "https://wordpress.org/plugins/devdome-safe-media-cleaner/",
+    "keywords": [
+        "wordpress",
+        "wordpress-plugin",
+        "media-library",
+        "cleanup",
+        "unused-media"
+    ],
+    "authors": [
+        {
+            "name": "DevDome",
+            "homepage": "https://devdome.com"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/DevDomeFamily/devdome-media-cleaner/issues",
+        "source": "https://github.com/DevDomeFamily/devdome-media-cleaner"
+    },
+    "require": {
+        "php": ">=7.4",
+        "composer/installers": "^1.0 || ^2.0"
+    }
+}
