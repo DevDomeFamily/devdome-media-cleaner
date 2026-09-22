@@ -1,158 +1,144 @@
-=== DevDome Media Cleaner – Remove Unused Images & Orphan Images ===
+=== DevDome Media Cleaner: Remove Unused Images & Media Library Cleanup ===
 Contributors: devdome
-Tags: media cleaner, unused images, unused media, orphaned images
+Tags: media cleaner, delete unused images, remove unused images, unused images, clean media library
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.0
+Stable tag: 1.1.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Image cleaner for WordPress. Find and delete unused images and orphan files safely with Recycle Bin restore.
+Find unused images and orphan images in uploads. Review file sizes, trash to a Recycle Bin, then restore or bulk delete selected images after review.
 
 == Description ==
 
-= WordPress Media Cleaner & Image Cleaner =
+DevDome Safe Media Cleaner is a WordPress media cleaner and image cleaner that finds unused images, orphan files, and missing media in your Media Library and uploads folder. Review the results, move selected files to a protected Recycle Bin, and check your site before restoring files or permanently deleting them.
 
-DevDome Safe Media Cleaner is a WordPress media cleaner and image cleaner for finding and safely removing unused images, orphan files, and missing media from your Media Library and uploads folder.
+= Find unused images and orphan files =
 
-Find unused images, review orphan images and files, and clean your WordPress Media Library without permanently deleting files immediately.
+Scan your Media Library for images with no detected reference on your website. The scanner checks common WordPress content and settings before marking an image as unused.
 
-Selected media moves to a protected Recycle Bin first, so you can check your site, restore cleaned files with one click, and permanently delete them only when you are ready.
+A disk scan finds orphan images and files in the uploads folder that have no matching Media Library record. These can accumulate after migrations, deleted plugins, failed uploads, manual file transfers, or years of website changes.
 
-= Find & Remove Unused Images =
+Review orphan media individually or in bulk. The disk scan covers images, including thumbnails left behind by deleted images; other file types are left alone.
 
-Scan your WordPress Media Library for images that are no longer referenced by your website.
+= Remove unused images with review and restore =
 
-DevDome Safe Media Cleaner checks common WordPress content and settings before marking an image as unused, including posts, pages, custom post types, builders, widgets, menus, featured images, galleries, Gutenberg blocks, CSS backgrounds, responsive images, and WordPress options.
+Image cleanup starts with a review, followed by a move to the Recycle Bin. You choose when to delete unused images permanently.
 
-Use the review screen to inspect unused images before deleting or moving anything.
-
-= Find Orphan Images & Files =
-
-Find orphan files that exist inside your WordPress uploads folder but no longer have a matching Media Library record.
-
-Orphan files can accumulate after migrations, deleted plugins, failed uploads, manual file transfers, or years of website changes.
-
-Review orphan media individually or in bulk and move unwanted files safely to the Recycle Bin.
-
-= Clean Your WordPress Media Library Safely =
-
-Media cleanup should not mean permanently deleting files without a way back.
-
-DevDome Safe Media Cleaner uses several safeguards:
+The plugin includes these safeguards: The media recycle bin lets you restore cleaned files to their original locations.
 
 * **Recycle Bin first:** cleaned files are moved instead of immediately deleted.
 * **Last-second re-check:** every selected file is checked again immediately before it moves.
 * **Protected by default:** recent uploads and uncertain files are not automatically selected.
-* **Clear review status:** files are marked Safe to remove, Needs manual review, or Protected with the reason shown.
+* **Clear review status:** files are marked Safe to remove, Needs manual review, or Protected, with the reason shown.
 * **ZIP backups:** create, download, upload, and restore media backups before cleanup.
 
-= How Media Cleanup Works =
+No scanner can detect every custom or hard-coded image reference. Review the results and check your website while the cleaned files can still be restored.
 
-1. **Scan:** Scan the WordPress Media Library and uploads folder in resumable background batches.
-2. **Review:** Search, filter, sort, and inspect unused images, orphan files, and missing media.
-3. **Clean:** Move selected media to the protected Recycle Bin.
-4. **Restore or delete:** Restore files with one click or permanently delete them after checking your website.
+= Clean media library workflow =
 
-= Detailed Image & Media Review =
+Use the plugin for media-library maintenance when you need to clean up images and review storage use.
 
-Review scan results in a visual grid or list.
+1. **Scan:** scan the WordPress Media Library and uploads folder in resumable background batches.
+2. **Review:** search, filter, sort, and inspect unused images, orphan files, and missing media.
+3. **Clean:** move selected media to the protected Recycle Bin.
+4. **Restore or delete:** restore files to their original locations with one click, or permanently delete them after checking your website.
+
+Nothing is removed until you review the results and choose what to clean. Scheduled scans do not automatically delete media.
+
+= Review images and disk usage =
+
+The plugin provides a media manager for cleanup review, with a visual grid or list of scan results.
 
 You can:
 
-* Search by filename
-* Filter by cleanup status
-* Sort by file size, dimensions, or age
-* Select individual files or clean media in bulk
-* View thumbnails, dimensions, file size, upload date, and cleanup reason
-* Export scan results to CSV
+* Search by filename.
+* Filter by cleanup status.
+* Sort by file size, dimensions, or age.
+* Select individual files or clean media in bulk.
+* View thumbnails, dimensions, file size, upload date, and cleanup reason.
+* Export scan results to CSV.
 
-Sorting unused images and orphan files by size makes it easy to find the media consuming the most disk space.
+Sort unused images and orphan files by size to find those consuming the most disk space. The dashboard shows the storage represented by flagged files.
 
-= Checks Common WordPress Image References =
+To bulk delete images, review your selection, move it to the Recycle Bin, and confirm permanent deletion after checking your site. The same review-first process applies when you bulk delete media identified by the scanner.
 
-Before identifying media as unused, the scanner checks common WordPress image references including:
+= WordPress image references checked =
 
-* Posts and pages
-* Custom post types
-* Revisions
-* Reusable and synced blocks
-* Featured images
-* Galleries
-* Gutenberg blocks
-* `srcset` and responsive images
-* Lazy-loading attributes
-* CSS backgrounds
-* Widgets
-* Navigation menus
-* Site logo and site icon
-* WordPress options
+The scanner checks these common reference locations:
 
-= Page Builder, WooCommerce & Plugin Support =
+* Posts, pages, custom post types, and revisions.
+* Reusable and synced blocks, Gutenberg blocks, featured images, and galleries.
+* `srcset`, responsive images, and lazy-loading attributes.
+* CSS backgrounds.
+* Widgets and navigation menus.
+* Site logo, site icon, and WordPress options.
 
-The scanner also checks data used by popular WordPress tools.
+Generated thumbnail sizes, scaled images, and edited copies are matched to their original Media Library attachment.
 
-**Page builders**
+= Page builders, WooCommerce, and plugin support =
 
-Elementor, Divi, Beaver Builder, WPBakery, Bricks, Oxygen, Kadence, GenerateBlocks, Spectra, SeedProd, and Thrive.
+The scanner checks data used by these WordPress tools:
 
-**WooCommerce**
+* **Page builders:** Elementor, Divi, Beaver Builder, WPBakery, Bricks, Oxygen, Kadence, GenerateBlocks, Spectra, SeedProd, and Thrive.
+* **WooCommerce:** product images, product galleries, variations, and category images.
+* **Custom fields and SEO plugins:** ACF, Meta Box, Yoast SEO, Rank Math, and AIOSEO.
 
-Product images, product galleries, variations, and category images.
+= Background jobs and large libraries =
 
-**Custom fields and SEO plugins**
+Media libraries can contain thousands of images. Scans run in small, resumable background batches to reduce memory usage and timeout risk. Pause and resume a scan without starting over.
 
-ACF, Meta Box, Yoast SEO, Rank Math, and AIOSEO.
+Scans, cleanups, backups, and restores run on the server and continue after you close the tab. Reopen the plugin page to see progress.
 
-**Generated WordPress images**
+On WordPress multisite, each site keeps its own scans, Recycle Bin, backups, and settings.
 
-Thumbnail sizes, scaled images, and edited copies are matched to their original Media Library attachment.
+= Free features and settings =
 
-= Built for Large Media Libraries =
+These features are free and unlimited:
 
-Large WordPress media libraries can contain thousands of images.
+* Unused image scanning, orphan file detection, and missing media detection.
+* Media review and reports.
+* Recycle Bin and one-click restore.
+* ZIP media backups.
+* Scheduled scans.
+* CSV export.
+* WP-CLI commands.
 
-Scans run in small, resumable background batches to reduce memory usage and timeout risk.
-
-You can pause and resume a scan without starting over.
-
-= Free Media Cleaner Features =
-
-The following features are free and unlimited:
-
-* Unused image scanning
-* Orphan file detection
-* Missing media detection
-* Media review and reports
-* Recycle Bin
-* One-click restore
-* ZIP media backups
-* Scheduled scans
-* CSV export
-* WP-CLI commands
-
-No DevDome account is required to scan, review, remove, restore, or delete unused media.
+Settings include scheduled scans, retention, protection rules, and optional DevDome Monitoring. No DevDome account is required to scan, review, report on, back up, remove, restore, or delete unused media.
 
 = Optional DevDome Monitoring =
 
-You can optionally connect a free DevDome account and enable Monitoring.
+Connect a free DevDome account and enable Monitoring if you want to track media-library growth across connected WordPress sites.
 
-After each scan, aggregate media statistics can be sent to DevDome so you can track media-library growth across connected WordPress sites and receive alerts when unused media exceeds a threshold you choose.
+After each scan, aggregate media statistics can be sent to DevDome. Monitoring tracks changes and sends alerts when unused media exceeds a threshold you choose.
 
 No media files, filenames, image URLs, or visitor data are sent.
+
+= AI and Agent Support =
+
+On WordPress 6.9 and newer, DevDome Safe Media Cleaner registers WordPress Abilities covering the whole plugin:
+
+* Media health summary, scan results with every filter, and filter options.
+* Job progress and control, and scans of the Media Library, disk, and preview.
+* One-click cleanup and moving chosen files to the Recycle Bin.
+* Batches and their files, restore, permanent delete, protect, and ignore.
+* Backups: list, create, restore, and delete.
+* Every setting and the error log.
+
+Compatible AI agents and MCP clients, for example through the official WordPress MCP Adapter, run the same code as the plugin screens under the same capability checks. Irreversible actions need an explicit confirmation.
 
 == External services ==
 
 **Plugin catalog (`devdome.com`).** The DevDome Dashboard inside wp-admin fetches the list of DevDome plugins (names, descriptions, logos, links, WordPress.org slugs) from `https://devdome.com/wp-plugins/catalog.json` at most once every 12 hours, so the list stays current. Only the bundled core version is sent in the request; no site or visitor data. Service provider: DevDome. Terms: https://devdome.com/terms-of-service Privacy policy: https://devdome.com/privacy-policy
 
-All scanning, classification, Recycle Bin, backup, and restore features run on your own server. The plugin connects to DevDome only after explicit opt-in.
+All scanning, classification, Recycle Bin, backup, and restore features run on your own server. Account connection and Monitoring require explicit opt-in. The plugin catalog fetch and manually submitted error reports are described separately here.
 
 1. **DevDome account connection (`devdome.com`, `api.devdome.com` and `analytics.devdome.com`) - optional.**
 
 Connecting an account is required only for optional DevDome Monitoring. When you start the connection, `devdome.com` opens in your browser. After approval, the plugin stores your public DevDome Account ID and a site token, then sends the site token to `api.devdome.com` to verify the connection; the connection handshake itself (start and claim) talks to `analytics.devdome.com`. The service returns the account email displayed in the plugin settings.
 
-The Account ID, site domain, and site token are transmitted. If you disconnect, the site domain and site token are sent once to unlink the site.
+The Account ID, site domain, and site token are transmitted. If you disconnect, the site domain and site token are sent once to unlink the site. When you connect from the DevDome Tools dashboard, whose Connect card states this before you press the button, those account checks also carry the slug and version of each active DevDome plugin on the site plus the bundled DevDome library, WordPress and PHP versions, so your DevDome account can show your sites and their DevDome plugins for support and update notices. Nothing about other plugins, users, email addresses, content or visitors is included. Sites connected before this was introduced, and sites connected from a button that does not show that text, do not send the list. Disconnecting stops the plugin list.
 
 No media files, filenames, private image URLs, or visitor data are sent.
 
@@ -179,7 +165,7 @@ The bundled shared library references these endpoints, but they are disabled and
 * `https://api.devdome.com/plugin-updates/` - used by the self-hosted DevDome suite installer. Updates and installs for this build come only from WordPress.org.
 * `https://api.devdome.com/media-cleaner/metrics` - used by the DevDome-distributed build for aggregate product metrics. It does not run in the WordPress.org build.
 
-Beyond the plugin catalog fetch and the error reports described above, no outbound request is made unless you explicitly connect a DevDome account. Monitoring statistics are sent only after you also enable DevDome Monitoring.
+Beyond the plugin catalog fetch and the error reports described below, no outbound request is made unless you explicitly connect a DevDome account. Monitoring statistics are sent only after you also enable DevDome Monitoring.
 
 3. **Error reports (`devdome.com`) - only when you press Report this error.** The button on an error message sends the error text, the plugin, WordPress and PHP versions, the screen you were on, your site address and your admin email (so support can reply) to `https://devdome.com/api/plugin/error-report`. Nothing is sent unless you press it. Terms: https://devdome.com/terms-of-service Privacy: https://devdome.com/privacy-policy
 
@@ -190,10 +176,6 @@ Beyond the plugin catalog fetch and the error reports described above, no outbou
 * **No cookies** are set by the plugin.
 * **No product metrics** are sent by the WordPress.org build.
 * **Optional Monitoring** sends only the aggregate statistics listed in the External services section after explicit opt-in.
-
-= AI and Agent Support =
-
-On WordPress 6.9 and newer, DevDome Safe Media Cleaner registers WordPress Abilities covering the whole plugin: media health summary, scan results with every filter, filter options, job progress and control, scans (Media Library, disk, preview), one-click cleanup, moving chosen files to the Recycle Bin, batches and their files, restore, permanent delete, protect and ignore, backups (list, create, restore, delete), every setting and the error log. Compatible AI agents and MCP clients, for example through the official WordPress MCP Adapter, run the same code as the plugin screens under the same capability checks; irreversible actions need an explicit confirmation.
 
 == Installation ==
 
@@ -210,13 +192,17 @@ No scanner can guarantee detection of every custom or hard-coded reference. DevD
 
 Uncertain files are marked Needs manual review and are not selected automatically. Selected files move to the Recycle Bin first so they can be restored.
 
-= Can I undo a cleanup? =
+= What is the Recycle Bin, and can I undo a cleanup? =
 
-Yes. The first cleanup action moves selected files to the Recycle Bin instead of permanently deleting them. Cleaned files can be restored to their original locations with one click.
+The Recycle Bin is a protected local folder that holds cleaned files before permanent deletion. The first cleanup action moves selected files there instead of permanently deleting them.
 
-= What is the difference between unused images and orphaned files? =
+Each cleanup batch includes a manifest and checksums. You can restore cleaned files to their original locations with one click while they remain in the Recycle Bin.
+
+= What is the difference between unused images and orphaned files, and does it clean up the uploads folder? =
 
 Unused images have a Media Library record but no detected reference on the site. Orphaned files exist in the uploads folder without a matching Media Library record.
+
+Yes, the disk scan walks wp-content/uploads and lists orphaned files: images with no Media Library record, including thumbnails left behind by deleted images. Other file types are left alone.
 
 = Does it find duplicate images? =
 
@@ -226,13 +212,17 @@ Not in this version. An identical copy is listed like any other unused or orphan
 
 Run a scan, open Review, and sort by file size. Review the largest unused images and orphaned files first. The dashboard shows the amount of storage represented by the flagged files.
 
+Moving files to the local Recycle Bin keeps them available for restoration. Check your site before confirming permanent deletion to reclaim that space.
+
 = Does it support page builders and WooCommerce? =
 
 Yes. It checks data used by Elementor, Divi, Beaver Builder, WPBakery, Bricks, Oxygen, Kadence, GenerateBlocks, Spectra, SeedProd, Thrive, WooCommerce, ACF, Meta Box, Yoast SEO, Rank Math, and AIOSEO.
 
-= Will scanning slow down my site? =
+= Will scanning slow down my site, and does cleanup keep running if I leave the page? =
 
 Scanning runs in small background batches to reduce memory use and timeout risk. Large scans can be paused and resumed.
+
+Yes, scans, cleanups, backups, and restores run on the server in background batches and continue after you close the tab. Reopen the plugin page to see the progress.
 
 = Do I need a DevDome account? =
 
@@ -242,25 +232,17 @@ No. Scanning, review, reports, backups, cleanup, the Recycle Bin, and restore wo
 
 Yes. Each site keeps its own scans, Recycle Bin, backups, and settings.
 
-= What is the Recycle Bin? =
-
-It is a protected local folder used to hold cleaned files before permanent deletion. Each cleanup batch includes a manifest and checksums so files can be restored to their original locations.
-
 = Does it delete unused images automatically? =
 
-No. Nothing is removed until you review the results and choose what to clean. The first step is always the Recycle Bin, so every cleanup can be undone.
-
-= Does it clean up the uploads folder? =
-
-Yes. The disk scan walks wp-content/uploads and lists orphaned files: images with no Media Library record, including thumbnails left behind by deleted images. Other file types are left alone.
-
-= Does the cleanup keep running if I leave the page? =
-
-Yes. Scans, cleanups, backups, and restores run on the server in background batches and continue after you close the tab. Reopen the plugin page to see the progress.
+No. Nothing is removed until you review the results and choose what to clean. The first step is always the Recycle Bin, so cleanup can be undone until you confirm permanent deletion.
 
 = What happens to the Recycle Bin when I uninstall? =
 
 Restore or permanently delete every batch first. Uninstalling removes the plugin tables, so files still in the Recycle Bin folder can no longer be restored from the screen; the folder itself is left in place and the hidden attachments become visible again.
+
+= Is unattached media safe to delete? =
+
+Not necessarily. An image can be used on your site without being attached to a particular post. The scanner checks image references before classifying files. Review the status and reason, keep uncertain files for manual review, and check your site before permanently deleting anything from the Recycle Bin.
 
 == Screenshots ==
 
@@ -272,6 +254,10 @@ Restore or permanently delete every batch first. Uninstalling removes the plugin
 6. Settings: configure scheduled scans, retention, protection rules, and optional DevDome Monitoring.
 
 == Changelog ==
+
+= 1.1.1 =
+* Bundled DevDome library 1.7.6: if you connect a DevDome account from the DevDome Tools dashboard, the Connect card now says exactly what is shared, including the list of active DevDome plugins and their versions. Sites that were already connected, and sites that never connect, send nothing new. See External services.
+* Listing text rewritten: new title, short description, tags and a restructured description. No change to how the plugin works.
 
 = 1.1.0 =
 * WordPress Abilities API: 22 abilities covering every feature (summary, scan results and filters, scans, cleanup, Recycle Bin batches, restore, permanent delete, protect, backups, settings, error log) for AI agents and MCP clients on WordPress 6.9 and newer.

@@ -465,9 +465,7 @@ function devdcorev1_hub_render_default()
     $not_inst  = array_values(array_filter($rows, function ($r) { return !$r['installed']; }));
 
     // Split the not-registered catalog entries into INACTIVE (present on disk but off) vs AVAILABLE (not installed).
-    if (!function_exists('is_plugin_active')) {
-        require_once ABSPATH . 'wp-admin/includes/plugin.php';
-    }
+    // (is_plugin_active() is there: this is a wp-admin screen, core loads its plugin functions itself.)
     $inactive  = array();
     $available = array();
     foreach ($not_inst as $r) {
@@ -574,12 +572,13 @@ function devdcorev1_hub_render_default()
                     <span class="ddh-ci">DD</span>
                     <div class="ddh-cbody">
                         <strong>Connect this site to your DevDome account</strong>
-                        <span>Connect a free DevDome account to get optional email alerts for this site. Nothing is sent to DevDome until you press Connect; connecting shares this site&rsquo;s domain with DevDome to link it to your account.</span>
+                        <span>Connecting is optional and nothing is sent to DevDome until you press Connect. By pressing Connect you agree that this site sends DevDome its domain and site token, the slug and version of each active DevDome plugin, and the DevDome library, WordPress and PHP versions. This is sent with the recurring account status checks to api.devdome.com, so your DevDome account can show your sites and their DevDome plugins for email alerts, support and update notices. It applies to all DevDome plugins on this site. Nothing about other plugins, users, email addresses, content or visitors is sent. Disconnecting stops it, and every plugin works without connecting. <a href="https://devdome.com/privacy-policy" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">Privacy Policy</a> &middot; <a href="https://devdome.com/terms-of-service" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">Terms of Service</a></span>
                     </div>
                     <div class="ddh-cctl">
                         <div class="ddh-cpanel">
                             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin:0;">
                                 <input type="hidden" name="action" value="devdcorev1_connect_go">
+                                <input type="hidden" name="devdcorev1_inventory" value="1"><?php // printed only beside the disclosure above: this press carries the inventory permission ?>
                                 <?php wp_nonce_field('devdcorev1_connect_go'); ?>
                                 <button type="submit" class="ddh-btn ddh-btn-solid ddh-cgo">Connect your DevDome account</button>
                             </form>
@@ -995,7 +994,6 @@ function devdcorev1_hub_handle_activate()
     }
     $result = 'fail';
     if ($file !== '') {
-        require_once ABSPATH . 'wp-admin/includes/plugin.php';
         if (file_exists(WP_PLUGIN_DIR . '/' . $file)) {
             $act = activate_plugin($file);
             $result = (is_wp_error($act) || !is_plugin_active($file)) ? 'fail' : 'activated'; // read back, never assumed (DeepSeek core round 1)

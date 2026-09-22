@@ -84,7 +84,7 @@ if (!function_exists('devdcorev1_reconcile_identity')) {
             return false;
         }
         update_option('devdcorev1_site_id', $current);
-        foreach (array('devdcorev1_conn_state', 'devdcorev1_connected_at', 'devdcorev1_account_id', 'devdcorev1_account_email', 'devdcorev1_connect_started', 'devdcorev1_hub_connect_dismissed') as $o) {
+        foreach (array('devdcorev1_conn_state', 'devdcorev1_connected_at', 'devdcorev1_account_id', 'devdcorev1_account_email', 'devdcorev1_connect_started', 'devdcorev1_inventory_consent', 'devdcorev1_connection_gen', 'devdcorev1_hub_connect_dismissed') as $o) {
             delete_option($o);
         }
         delete_transient('devdcorev1_conn_checked');
@@ -161,7 +161,7 @@ if (!function_exists('devdcorev1_connection_state')) {
                 'Content-Type'  => 'application/json',
                 'Authorization' => 'Bearer ' . $token,
             ),
-            'body'    => wp_json_encode(array('site' => $site)),
+            'body'    => wp_json_encode(devdcorev1_inventory_allowed() ? array('site' => $site, 'inventory' => devdcorev1_inventory_payload()) : array('site' => $site)),
         ));
         if (is_wp_error($resp)) {
             set_transient('devdcorev1_conn_checked', 1, 10 * MINUTE_IN_SECONDS); // outage: keep last known
@@ -187,11 +187,58 @@ if (!function_exists('devdcorev1_connection_state')) {
             // from a proxy or a host outage carries no JSON and must not wipe a live connection.
             $state = array('ok' => 0, 'account_id' => '', 'email' => '');
             update_option('devdcorev1_conn_state', $state, false);
+            delete_option('devdcorev1_inventory_consent'); // unlinked on the server: later checks carry the site only (1.7.6)
             set_transient('devdcorev1_conn_checked', 1, HOUR_IN_SECONDS);
         } else {
             set_transient('devdcorev1_conn_checked', 1, 10 * MINUTE_IN_SECONDS); // 5xx: keep last known
         }
         return $state;
+    }
+}
+
+if (!function_exists('devdcorev1_inventory_allowed')) {
+    /**
+     * Plugin inventory sharing (core 1.7.6). True only when an administrator pressed Connect on a screen that showed the
+     * inventory disclosure: the consent record is written by that connect and by nothing else, so a site connected before
+     * 1.7.6, or connected from a button without the disclosure, never sends the list. Disconnect removes it.
+     * The record names the connection it belongs to: devdcorev1_connection_gen, a random id written by every completed
+     * connect (a date would repeat within one second). A record that outlived its connection because a delete failed can
+     * never speak for a later one (Codex + DeepSeek 1.7.6 rounds 1 and 2).
+     */
+    function devdcorev1_inventory_allowed()
+    {
+        $c = get_option('devdcorev1_inventory_consent', null);
+        $gen = (string) get_option('devdcorev1_connection_gen', '');
+        return is_array($c) && isset($c['v'], $c['gen']) && 1 === (int) $c['v']
+            && strlen($gen) >= 20 && hash_equals($gen, (string) $c['gen']);
+    }
+
+    /**
+     * What a consenting connected site adds to its account status check: the ACTIVE DevDome plugins (slug + version) and the
+     * library, WordPress and PHP versions. Only plugins that registered themselves with the DevDome suite AND carry a
+     * devdome- slug are listed (the built-in catalog misses newer plugins such as Country Blocker); never another plugin of the site.
+     */
+    function devdcorev1_inventory_payload()
+    {
+        $live = apply_filters('devdcorev1_suite_register', array());
+        $plugins = array();
+        if (is_array($live)) {
+            foreach ($live as $slug => $d) {
+                $slug = sanitize_key((string) $slug);
+                if (!preg_match('/^devdome-[a-z0-9-]{2,60}$/', $slug)) {
+                    continue;
+                }
+                $ver = (is_array($d) && isset($d['version'])) ? preg_replace('/[^0-9A-Za-z.\-+]/', '', (string) $d['version']) : '';
+                $plugins[] = array('slug' => $slug, 'version' => substr((string) $ver, 0, 20));
+            }
+        }
+        return array(
+            'v'       => 1,
+            'plugins' => array_slice($plugins, 0, 40),
+            'core'    => defined('DEVDCOREV1_VERSION') ? (string) DEVDCOREV1_VERSION : '',
+            'wp'      => (string) get_bloginfo('version'),
+            'php'     => PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION,
+        );
     }
 }
 
@@ -229,6 +276,13 @@ function devdcorev1_hub_handle_connect_go()
     check_admin_referer('devdcorev1_connect_go');
     devdcorev1_reconcile_identity();
     update_option('devdcorev1_connect_started', time(), false);
+    // Inventory sharing (1.7.6): only a Connect form that printed the disclosure carries this field. Any other entry point
+    // (a plugin's own Connect button, an older screen) clears it, so the connection is made without the inventory permission.
+    // phpcs:ignore WordPress.Security.NonceVerification.Missing -- check_admin_referer() above.
+    $inventory_yes = isset($_POST['devdcorev1_inventory']) && '1' === sanitize_text_field(wp_unslash($_POST['devdcorev1_inventory']));
+    // A new connect decides again. Even if this delete fails, the old record names the OLD connection's id, so it is dead
+    // the moment this connect writes its own id.
+    delete_option('devdcorev1_inventory_consent');
     $tools = admin_url('admin.php?page=' . (defined('DEVDCOREV1_TOOLS_MENU_SLUG') ? DEVDCOREV1_TOOLS_MENU_SLUG : 'devdome-tools'));
     // Optional `return`: the plugin screen the user came from, shown again once the connect
     // completes (1.5.9). Same-site URLs only (wp_validate_redirect); anything else = the hub.
@@ -278,6 +332,7 @@ function devdcorev1_hub_handle_connect_go()
         'remote_nonce' => (string) $data['nonce'],
         'user_id'      => get_current_user_id(),
         'wp_nonce'     => wp_create_nonce('devdcorev1_connect_complete_' . $rt),
+        'inventory'    => $inventory_yes ? 1 : 0, // bound to this request and this user; a parallel attempt cannot lend it (Codex 1.7.6 round 1)
     ), 20 * MINUTE_IN_SECONDS);
     if ('' !== $return) {
         set_transient('devdcorev1_connret_' . $rt, $return, 20 * MINUTE_IN_SECONDS);
@@ -366,6 +421,14 @@ function devdcorev1_hub_maybe_complete_connect()
     }
     update_option('devdcorev1_account_id', $acct);
     update_option('devdcorev1_connected_at', $stamp);
+    // Every completed connect gets its own random id, consent or not: an older consent record names an older id.
+    $gen = wp_generate_password(32, false);
+    update_option('devdcorev1_connection_gen', $gen, false);
+    if (is_array($pending) && !empty($pending['inventory'])) {
+        update_option('devdcorev1_inventory_consent', array('v' => 1, 'at' => time(), 'user' => get_current_user_id(), 'gen' => $gen), false);
+    } else {
+        delete_option('devdcorev1_inventory_consent');
+    }
     // The claim itself is the proof of connection: record it locally FIRST, so the UI lands
     // connected even when the follow-up account lookup below fails (it then keeps this state).
     update_option('devdcorev1_conn_state', array('ok' => 1, 'account_id' => $acct, 'email' => '', 'plan' => ''), false);
@@ -376,11 +439,14 @@ function devdcorev1_hub_maybe_complete_connect()
     // The stamp too (Codex Analytics round 5): the plugins lift their own stop markers from devdcorev1_connected_at,
     // so a lost stamp write would leave Analytics stopped on a site the hub calls connected.
     if ((string) get_option('devdcorev1_account_id', '') !== $acct || (string) get_option('devdcorev1_connected_at', '') !== $stamp
+        || (string) get_option('devdcorev1_connection_gen', '') !== $gen
         || !is_array($st) || empty($st['ok']) || (string) (isset($st['account_id']) ? $st['account_id'] : '') !== $acct) { // the verdict's own account too (Codex Analytics round 6)
         // Half a connection is no connection: back to the negative verdict and no stamp, each step read back; when
         // even the verdict cannot be rewritten the rows that would paint "connected" are dropped instead.
         update_option('devdcorev1_conn_state', $neg, false);
         delete_option('devdcorev1_connected_at');
+        delete_option('devdcorev1_inventory_consent');
+        delete_option('devdcorev1_connection_gen');
         $chk = get_option('devdcorev1_conn_state', null);
         if (!is_array($chk) || !empty($chk['ok'])) {
             delete_option('devdcorev1_conn_state');
@@ -469,6 +535,8 @@ function devdcorev1_hub_handle_account()
     delete_option('devdcorev1_account_id'); // disconnect wipes the WHOLE identity — a surviving id re-paints "connected" UIs
     delete_option('devdcorev1_account_email');
     delete_option('devdcorev1_connect_started');
+    delete_option('devdcorev1_inventory_consent'); // disconnecting stops inventory sharing (1.7.6)
+    delete_option('devdcorev1_connection_gen');
     delete_option('devdcorev1_hub_connect_dismissed'); // the connect card should reappear
     // The local clear is proved on the rows, not assumed (core 1.7.0, Codex high round 24): a delete that did not
     // land leaves the site connected and every cloud switch on while the screen said "Disconnected".
@@ -476,8 +544,8 @@ function devdcorev1_hub_handle_account()
     // The consent stamp too (Codex round 6): a surviving devdcorev1_connect_started let the next verification
     // call home and re-paint "connected" without another Connect action.
     $left = $wpdb->get_var($wpdb->prepare(
-        "SELECT COUNT(*) FROM {$wpdb->options} WHERE option_name IN (%s, %s, %s, %s)",
-        'devdcorev1_conn_state', 'devdcorev1_account_id', 'devdcorev1_connected_at', 'devdcorev1_connect_started'
+        "SELECT COUNT(*) FROM {$wpdb->options} WHERE option_name IN (%s, %s, %s, %s, %s)",
+        'devdcorev1_conn_state', 'devdcorev1_account_id', 'devdcorev1_connected_at', 'devdcorev1_connect_started', 'devdcorev1_inventory_consent'
     ));
     $local_ok = $left !== null && (int) $left === 0 && (string) $wpdb->last_error === '';
     $state    = devdcorev1_connection_state(true); // re-verify now so the UI flips immediately

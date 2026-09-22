@@ -107,13 +107,9 @@ function devdcorev1_hub_handle_install()
         wp_die(esc_html('Unknown plugin.'));
     }
 
-    require_once ABSPATH . 'wp-admin/includes/plugin.php';
-    require_once ABSPATH . 'wp-admin/includes/plugin-install.php';
-    require_once ABSPATH . 'wp-admin/includes/file.php';
-    require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
-
     $result = 'fail';
     $wporg  = (string) $catalog[$slug]['wporg_slug'];
+    require_once ABSPATH . 'wp-admin/includes/plugin-install.php'; // plugins_api(); plugin.php and file.php are already loaded in wp-admin
     $api = plugins_api('plugin_information', array('slug' => $wporg, 'fields' => array('sections' => false)));
 
     // Only ever install from the official WP.org download host, and only the exact slug we asked for.
@@ -121,6 +117,7 @@ function devdcorev1_hub_handle_install()
         && !empty($api->download_link)
         && isset($api->slug) && $api->slug === $wporg
         && wp_parse_url($api->download_link, PHP_URL_HOST) === 'downloads.wordpress.org') {
+        require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
         $upgrader  = new Plugin_Upgrader(new WP_Ajax_Upgrader_Skin());
         $installed = $upgrader->install($api->download_link);
         if (!is_wp_error($installed) && $installed === true) {

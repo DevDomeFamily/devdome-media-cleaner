@@ -20,7 +20,7 @@ if (defined('DEVDCOREV1_LOADED')) {
     return; // a higher/equal version already loaded the library
 }
 define('DEVDCOREV1_LOADED', true);
-define('DEVDCOREV1_VERSION', '1.7.4');
+define('DEVDCOREV1_VERSION', '1.7.6');
 
 if (!defined('DEVDCOREV1_FEED_ENDPOINT')) {
     define('DEVDCOREV1_FEED_ENDPOINT', 'https://api.devdome.com/bot-protection');
