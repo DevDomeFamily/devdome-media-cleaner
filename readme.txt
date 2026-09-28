@@ -1,4 +1,4 @@
-=== DevDome Media Cleaner: Remove Unused Images & Media Library Cleaner ===
+=== DevDome Media Cleaner: Remove Unused Images & Media Library Cleanup ===
 Contributors: devdome
 Tags: media cleaner, unused images, orphan images, unused attachments, media trash
 Requires at least: 6.0
