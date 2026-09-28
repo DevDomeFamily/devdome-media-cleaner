@@ -1,18 +1,22 @@
-=== DevDome Media Cleaner: Remove Unused Images & Media Library Cleanup ===
+=== DevDome Media Cleaner: Remove Unused Images & Media Library Cleaner ===
 Contributors: devdome
-Tags: media cleaner, delete unused images, remove unused images, unused images, clean media library
+Tags: media cleaner, unused images, orphan images, unused attachments, media trash
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.1
+Stable tag: 1.1.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Find unused images and orphan images in uploads. Review file sizes, trash to a Recycle Bin, then restore or bulk delete selected images after review.
+Find unused images and orphan images, view sizes and remove unused media; restore from the Recycle Bin or delete unused images after review.
 
 == Description ==
 
-DevDome Safe Media Cleaner is a WordPress media cleaner and image cleaner that finds unused images, orphan files, and missing media in your Media Library and uploads folder. Review the results, move selected files to a protected Recycle Bin, and check your site before restoring files or permanently deleting them.
+DevDome Media Cleaner is a WordPress media library cleaner for reviewing unused images before removal. Use this image cleaner to find unused images and inspect unused attachments flagged by checks of common WordPress content and settings. An image with no detected reference still needs review before cleanup.
+
+For media library cleanup, a disk scan also finds orphan images, including thumbnails left behind by deleted images. These orphaned images have no matching Media Library record. Review this orphaned media individually or in bulk, and inspect file sizes and cleanup reasons when assessing potentially unused files. The disk scan leaves other file types alone.
+
+Media cleanup starts with review: remove unused media by moving selected images to a protected Recycle Bin that acts as media trash. Every selected file is checked again immediately before it moves. Review Recycle Bin media and check your site, then restore files to their original locations or delete unused media permanently.
 
 = Find unused images and orphan files =
 
@@ -254,6 +258,10 @@ Not necessarily. An image can be used on your site without being attached to a p
 6. Settings: configure scheduled scans, retention, protection rules, and optional DevDome Monitoring.
 
 == Changelog ==
+
+= 1.1.2 =
+
+* Listing text updated: title, short description, tags and introduction. No code changes.
 
 = 1.1.1 =
 * Bundled DevDome library 1.7.6: if you connect a DevDome account from the DevDome Tools dashboard, the Connect card now says exactly what is shared, including the list of active DevDome plugins and their versions. Sites that were already connected, and sites that never connect, send nothing new. See External services.

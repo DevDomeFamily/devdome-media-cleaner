@@ -113,6 +113,18 @@ function devdsame_inline_css()
         .dd-app .mc-actions .mc-bk-split > .dd-btn { width:100%; }
         .dd-app .dd-btn:disabled { opacity:.45; cursor:not-allowed; }
         /* Header bug-report button — EXACT twin of the DevDome dashboard .stats-btn bug button. */
+        /* Connect card: the DevDome Tools dashboard Connect card, one to one (same CSS as Bot Protection .bp-conn). */
+        .dd-app .mc-conn { display:flex; align-items:center; gap:16px; background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:18px 20px; margin:0 0 16px; box-shadow:0 1px 2px rgba(0,0,0,.05); flex-wrap:wrap; }
+        .dd-app .mc-conn-ci { display:inline-flex; align-items:center; justify-content:center; width:46px; height:46px; border-radius:12px; background:linear-gradient(150deg,#3b82f6,#2563eb 55%,#1d4ed8); box-shadow:0 7px 15px -6px rgba(37,99,235,.6); flex:none; color:#fff; font-weight:800; letter-spacing:-1px; font-size:18px; }
+        .dd-app .mc-conn-body { flex:1 1 320px; min-width:0; }
+        .dd-app .mc-conn-body strong { display:block; font-size:14.5px; font-weight:700; color:#0f172a; }
+        .dd-app .mc-conn-body span { font-size:12.5px; color:#475569; line-height:1.45; }
+        .dd-app .mc-conn-body a { color:#2563eb; text-decoration:underline; }
+        .dd-app .mc-conn-ctl { display:flex; flex-direction:column; gap:8px; flex:0 1 272px; }
+        .dd-app .mc-conn-btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; font-size:14px; font-weight:600; border-radius:8px; padding:10px 20px; text-decoration:none; cursor:pointer; line-height:1; border:1px solid transparent; white-space:nowrap; transition:.12s; }
+        .dd-app .mc-conn-solid { width:100%; padding:9px 14px; color:#fff; background:#2563eb; border-color:#2563eb; box-shadow:0 4px 10px -3px rgba(37,99,235,.5); }
+        .dd-app .mc-conn-solid:hover { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
+        .dd-app .mc-conn-hint { font-size:11px; color:#8a94a6; text-align:center; margin:0; }
         .dd-app .mc-bug-btn { width:36px; height:36px; border-radius:50px; border:1px solid #dadce0; background:#fff; display:grid; place-items:center; cursor:pointer; color:#5f6368; transition:all .2s; text-decoration:none; }
         .dd-app .mc-bug-btn:hover { background:#f8fbff; border-color:#1967d2; color:#1967d2; }
         .dd-app .mc-bug-btn svg { width:16px; height:16px; }
@@ -1078,10 +1090,17 @@ function devdsame_render_settings_tab()
             <div class="dd-card">
                 <div class="dd-sec-head"><span class="dashicons dashicons-email dd-ico"></span><h2 class="dd-h2"><?php esc_html_e('DevDome Monitoring', 'devdome-safe-media-cleaner'); ?></h2></div>
                 <?php if (!$mc_account_id) : ?>
-                    <style>.dd-cgo-btn:hover{background:#1d4ed8 !important;border-color:#1d4ed8 !important;}</style>
-                    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:0 0 16px;" class="dd-gate-strip">
-                        <a href="<?php echo esc_url(devdsame_connect_url()); ?>" class="dd-cgo-btn" style="display:inline-flex;align-items:center;justify-content:center;gap:6px;font-size:14px;font-weight:600;border-radius:8px;padding:10px 20px;text-decoration:none;cursor:pointer;line-height:1;white-space:nowrap;transition:.12s;color:#fff;background:#2563eb;border:1px solid #2563eb;box-shadow:0 4px 10px -3px rgba(37,99,235,.5);"><?php esc_html_e('Connect your DevDome account', 'devdome-safe-media-cleaner'); ?></a>
-                        <span style="font-size:13px;color:#6b7280;"><?php esc_html_e('Monitoring runs on DevDome servers. Requires a DevDome account.', 'devdome-safe-media-cleaner'); ?></span>
+                    <?php // The DevDome Tools dashboard Connect card, one to one (same as Bot Protection): badge, text left, button right. ?>
+                    <div class="mc-conn">
+                        <span class="mc-conn-ci">DD</span>
+                        <div class="mc-conn-body">
+                            <strong><?php esc_html_e('Connect this site to your DevDome account', 'devdome-safe-media-cleaner'); ?></strong>
+                            <span>Connecting is optional and nothing is sent until you press Connect. It opens devdome.com to sign in; after approval the plugin stores your Account ID and a site token and sends the site domain, token and Account ID to api.devdome.com to verify the connection and keep it checked. Monitoring then runs on DevDome servers. No media files, filenames, image URLs or visitor data are sent. Disconnecting stops it. <a href="https://devdome.com/privacy-policy" target="_blank" rel="noopener noreferrer">Privacy Policy</a> &middot; <a href="https://devdome.com/terms-of-service" target="_blank" rel="noopener noreferrer">Terms of Service</a></span>
+                        </div>
+                        <div class="mc-conn-ctl">
+                            <a href="<?php echo esc_url(devdsame_connect_url()); ?>" class="mc-conn-btn mc-conn-solid"><?php esc_html_e('Connect your DevDome account', 'devdome-safe-media-cleaner'); ?></a>
+                            <p class="mc-conn-hint"><?php esc_html_e('Opens devdome.com to sign in, then links this site.', 'devdome-safe-media-cleaner'); ?></p>
+                        </div>
                     </div>
                 <?php endif; ?>
                 <table class="dd-table">
