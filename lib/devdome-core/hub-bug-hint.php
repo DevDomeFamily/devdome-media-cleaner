@@ -3,8 +3,9 @@
  * One-time "Report a bug" hint (owner request, 29 Sep 2026).
  *
  * The first time a user opens ANY DevDome plugin screen, a small bubble points at the bug button in the header
- * ("Found an issue? Report it here."). It is recorded per user the moment it is printed, so it shows exactly once
- * across the whole suite, never once per plugin. Dismiss is client-side only (any click or Escape): no AJAX, no option.
+ * ("Found an issue? Report it here."). The bubble's own script marks it seen per user the moment it is shown (a
+ * nonce-checked admin-ajax call: the page view itself, a GET, writes nothing), so it shows once across the whole
+ * suite, never once per plugin. Dismiss is client-side only (any click or Escape).
  */
 if (!defined('ABSPATH')) {
     exit;
@@ -23,7 +24,6 @@ function devdcorev1_bug_hint_enqueue()
     if (!$uid || get_user_meta($uid, 'devdcorev1_bug_hint_seen', true)) {
         return;
     }
-    update_user_meta($uid, 'devdcorev1_bug_hint_seen', 1);
 
     $ver = defined('DEVDCOREV1_VERSION') ? DEVDCOREV1_VERSION : '1.0';
     wp_register_script('devdcorev1-bug-hint', false, array(), $ver, true);
@@ -32,10 +32,25 @@ function devdcorev1_bug_hint_enqueue()
 }
 add_action('admin_enqueue_scripts', 'devdcorev1_bug_hint_enqueue');
 
+/** admin-ajax: the bubble was shown to this user, never show it again (nonce + signed-in user). */
+function devdcorev1_bug_hint_seen()
+{
+    check_ajax_referer('devdcorev1_bug_hint', 'nonce');
+    $uid = get_current_user_id();
+    if (!$uid || !current_user_can('read') || !isset($_SERVER['REQUEST_METHOD']) || $_SERVER['REQUEST_METHOD'] !== 'POST') {
+        wp_send_json_error('Forbidden.', 403);
+    }
+    update_user_meta($uid, 'devdcorev1_bug_hint_seen', 1);
+    wp_send_json_success();
+}
+add_action('wp_ajax_devdcorev1_bug_hint_seen', 'devdcorev1_bug_hint_seen');
+
 /** The bubble: finds the header bug button (also inside a same-origin iframe, Affiliate Manager) and sits under it. */
 function devdcorev1_bug_hint_js()
 {
     $text = wp_json_encode('Found an issue? Report it here.');
+    $ajax = wp_json_encode(admin_url('admin-ajax.php'));
+    $nonce = wp_json_encode(wp_create_nonce('devdcorev1_bug_hint'));
     $css  = wp_json_encode(
         '.devdcorev1-bug-hint{position:absolute;z-index:99999;display:flex;align-items:center;gap:10px;max-width:280px;padding:9px 10px 9px 13px;'
         . 'background:#1f2937;color:#fff;font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;border-radius:8px;'
@@ -54,6 +69,7 @@ function devdcorev1_bug_hint_js()
         . 'var txt=doc.createElement("span");txt.textContent=' . $text . ';el.appendChild(txt);'
         . 'var x=doc.createElement("button");x.type="button";x.setAttribute("aria-label","Dismiss");x.innerHTML="&times;";el.appendChild(x);'
         . 'doc.body.appendChild(el);'
+        . 'try{var fd=new FormData();fd.append("action","devdcorev1_bug_hint_seen");fd.append("nonce",' . $nonce . ');fetch(' . $ajax . ',{method:"POST",credentials:"same-origin",body:fd});}catch(e){}'
         . 'var w=doc.defaultView;function place(){var r=b.getBoundingClientRect();el.style.top=(r.bottom+w.scrollY+10)+"px";el.style.left=Math.max(8,r.right+w.scrollX-el.offsetWidth)+"px";}'
         . 'place();w.addEventListener("resize",place);'
         . 'function off(){if(el.parentNode){el.parentNode.removeChild(el);}doc.removeEventListener("click",off,true);doc.removeEventListener("keydown",key,true);w.removeEventListener("resize",place);}'

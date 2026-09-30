@@ -1095,7 +1095,7 @@ function devdsame_render_settings_tab()
                         <span class="mc-conn-ci">DD</span>
                         <div class="mc-conn-body">
                             <strong><?php esc_html_e('Connect this site to your DevDome account', 'devdome-safe-media-cleaner'); ?></strong>
-                            <span>Connecting is optional and nothing is sent until you press Connect. It opens devdome.com to sign in; after approval the plugin stores your Account ID and a site token and sends the site domain, token and Account ID to api.devdome.com to verify the connection and keep it checked. Monitoring then runs on DevDome servers. No media files, filenames, image URLs or visitor data are sent. Disconnecting stops it. <a href="https://devdome.com/privacy-policy" target="_blank" rel="noopener noreferrer">Privacy Policy</a> &middot; <a href="https://devdome.com/terms-of-service" target="_blank" rel="noopener noreferrer">Terms of Service</a></span>
+                            <span>Connect sends your domain, site token and Account ID to api.devdome.com; monitoring then runs on DevDome servers. No media files, filenames, image URLs or visitor data are sent. See the readme&rsquo;s External services section for details. <a href="https://devdome.com/privacy-policy" target="_blank" rel="noopener noreferrer">Privacy Policy</a> &middot; <a href="https://devdome.com/terms-of-service" target="_blank" rel="noopener noreferrer">Terms of Service</a></span>
                         </div>
                         <div class="mc-conn-ctl">
                             <a href="<?php echo esc_url(devdsame_connect_url()); ?>" class="mc-conn-btn mc-conn-solid"><?php esc_html_e('Connect your DevDome account', 'devdome-safe-media-cleaner'); ?></a>

@@ -4,7 +4,7 @@ Tags: media cleaner, unused images, orphan images, unused attachments, media tra
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.2
+Stable tag: 1.1.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -259,9 +259,16 @@ Not necessarily. An image can be used on your site without being attached to a p
 
 == Changelog ==
 
+= 1.1.3 =
+
+* Shared DevDome library 1.7.8: the one-time Report a bug hint is recorded through a nonce-checked request instead of on a page view.
+* Shared DevDome library 1.7.9: the DevDome dashboard lists only real problems (a feature that is off, paused or not connected is no longer an issue) and no longer says Not monitored.
+* Shorter Connect card text.
+
 = 1.1.2 =
 
-* Listing text updated: title, short description, tags and introduction. No code changes.
+* Listing text updated: title, short description, tags and introduction.
+* Shared DevDome library 1.7.7: the first time you open any DevDome plugin screen, a small one-time hint points at the Report a bug button. It is shown once per user across all DevDome plugins.
 
 = 1.1.1 =
 * Bundled DevDome library 1.7.6: if you connect a DevDome account from the DevDome Tools dashboard, the Connect card now says exactly what is shared, including the list of active DevDome plugins and their versions. Sites that were already connected, and sites that never connect, send nothing new. See External services.
