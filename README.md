@@ -1,6 +1,6 @@
-# DevDome Media Cleaner: Remove Unused Images # DevDome Media Cleaner: Remove Unused Images & Media Library Cleanup Media Library Cleanup
+# DevDome Media Cleaner: Remove Unused Images & Media Library Cleanup
 
-Find unused images and orphan images, view sizes and remove unused media; restore from the Recycle Bin or delete unused images after review. This free WordPress media cleaner runs on your own server, with ZIP backups and one-click restore. No account is required for cleanup.
+Find unused images and orphan images, remove duplicate images from the WordPress media library. Safe trash and recovery workflow. Review flagged images and move selected files to a protected Recycle Bin, with every selected file checked again immediately before it moves. Check your site, then restore files to their original locations or delete them permanently.
 
 [![WordPress Plugin Version](https://img.shields.io/wordpress/plugin/v/devdome-safe-media-cleaner?label=wp.org)](https://wordpress.org/plugins/devdome-safe-media-cleaner/)
 [![Active Installs](https://img.shields.io/wordpress/plugin/installs/devdome-safe-media-cleaner)](https://wordpress.org/plugins/devdome-safe-media-cleaner/)
@@ -22,7 +22,7 @@ Find unused images and orphan images, view sizes and remove unused media; restor
 |---|---|---|---|---|---|
 | Unused images in the Media Library | Free | Free | No | No | No |
 | Orphan files in the uploads folder | Free | Pro licence | No | Yes | No |
-| Exact duplicate detection | Planned, not in 1.1.2 | No | Yes | No | No |
+| Exact duplicate detection | Yes, identical copies among unused images; used images are never marked | No | Yes | No | No |
 | Recycle Bin with one-click restore | Yes | Trash | No | No | No |
 | ZIP backup and restore of media | Yes | No | No | No | No |
 | Background scanning on large libraries | Yes | Pro | No | No | n/a |
