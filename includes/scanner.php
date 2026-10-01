@@ -362,8 +362,12 @@ function devdsame_finalize_scan($scan_id)
 {
     global $wpdb;
 
-    // No duplicate reclassification: an identical copy is simply unused (or orphan) like
-    // anything else — a separate "duplicate" bucket only confused the tile math.
+    // Duplicates (owner 2026-09-30, back after 0.2.3): identical copies among the UNUSED and UNCERTAIN library items are
+    // marked 'duplicate' with the oldest copy kept as the suggested keeper. They get their own pill and tile, so the
+    // Unused count never silently shrinks. A used image is never marked. Orphans (the Disk side) are left alone.
+    if (!devdsame_mark_duplicates($scan_id)) {
+        return devdsame_fail_scan($scan_id, __('The duplicate check could not be saved (database write failed).', 'devdome-safe-media-cleaner'));
+    }
 
     $scans = $wpdb->prefix . 'devdsame_scans';
     $items = $wpdb->prefix . 'devdsame_scan_items';

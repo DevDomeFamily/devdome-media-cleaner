@@ -578,14 +578,17 @@ function devdsame_render_dashboard_tab($s)
             <?php else : ?>
                 <?php
                 $lib_total_b  = (int) $s['total_library_bytes'];
-                $lib_unused_b = (int) $s['library_cleanup_bytes'];
-                $lib_used_b   = max(0, $lib_total_b - $lib_unused_b);
+                $lib_unused_b = isset($s['unused_bytes']) ? (int) $s['unused_bytes'] : (int) $s['library_cleanup_bytes']; // unused alone; duplicates have their own tile
+                $lib_used_b   = max(0, $lib_total_b - (int) $s['library_cleanup_bytes']);
                 ?>
                 <div class="dd-stats" style="margin-top:18px;">
                     <div class="dd-stat"><div class="dd-stat-num"><?php echo (int) $s['total_files']; ?></div><div class="dd-stat-lbl"><?php esc_html_e('Total images', 'devdome-safe-media-cleaner'); ?></div><div class="dd-stat-sub"><?php echo esc_html($lib_total_b > 0 ? size_format($lib_total_b) : '0 B'); ?></div></div>
                     <div class="dd-stat"><div class="dd-stat-num" style="color:#10b981;"><?php echo (int) $s['used_count']; ?></div><div class="dd-stat-lbl"><?php esc_html_e('Used images', 'devdome-safe-media-cleaner'); ?></div><div class="dd-stat-sub"><?php echo esc_html($lib_used_b > 0 ? size_format($lib_used_b) : '0 B'); ?></div></div>
                     <div class="dd-stat"><div class="dd-stat-num" style="color:#f59e0b;"><?php echo (int) $s['unused_count']; ?></div><div class="dd-stat-lbl"><?php esc_html_e('Unused images', 'devdome-safe-media-cleaner'); ?></div><div class="dd-stat-sub"><?php echo esc_html($lib_unused_b > 0 ? size_format($lib_unused_b) : '0 B'); ?></div></div>
                     <div class="dd-stat"><div class="dd-stat-num" style="color:#4f46e5;"><?php echo esc_html((int) $s['library_cleanup_bytes'] > 0 ? size_format((int) $s['library_cleanup_bytes']) : '0 B'); ?></div><div class="dd-stat-lbl"><?php esc_html_e('Possible cleanup', 'devdome-safe-media-cleaner'); ?></div></div>
+                    <?php if ((int) $s['duplicate_count'] > 0) : // identical copies among the unused images (owner 2026-09-30) ?>
+                        <div class="dd-stat"><div class="dd-stat-num" style="color:#f59e0b;"><?php echo (int) $s['duplicate_count']; ?></div><div class="dd-stat-lbl"><?php esc_html_e('Duplicate images', 'devdome-safe-media-cleaner'); ?></div></div>
+                    <?php endif; ?>
                     <?php if ((int) $s['uncertain_count'] > 0) : // shown ONLY when the scanner could not verify some images ?>
                         <div class="dd-stat"><div class="dd-stat-num" style="color:#f59e0b;"><?php echo (int) $s['uncertain_count']; ?></div><div class="dd-stat-lbl"><?php esc_html_e('Needs review', 'devdome-safe-media-cleaner'); ?></div></div>
                     <?php endif; ?>
@@ -598,7 +601,6 @@ function devdsame_render_dashboard_tab($s)
 
         <!-- ============ TOOL 2: Disk Cleaner ============ -->
         <?php
-        // duplicate_count folds in for summaries written by older versions (bucket removed 0.2.3).
         $orphan_disk = (int) $s['orphan_count'];
         $never_disk_scanned = ((int) $s['last_disk_scan_id'] === 0);
         ?>
@@ -735,7 +737,7 @@ function devdsame_render_review_tab($s)
             // Land on the first bucket that actually has content — opening "Review" onto an
             // empty Unused list when there are 900 duplicates reads as broken.
             $default_status = 'unused';
-            foreach (array('unused' => 'unused_count', 'orphan' => 'orphan_count', 'uncertain' => 'uncertain_count', 'missing' => 'missing_count') as $st => $key) {
+            foreach (array('unused' => 'unused_count', 'duplicate' => 'duplicate_count', 'orphan' => 'orphan_count', 'uncertain' => 'uncertain_count', 'missing' => 'missing_count') as $st => $key) {
                 if ((int) $s[$key] > 0) {
                     $default_status = $st;
                     break;
@@ -744,7 +746,7 @@ function devdsame_render_review_tab($s)
             // An explicit ?filter= always wins — dashboard links land on their bucket, and a
             // post-clean reload stays on the SIDE the user was working in (never jumps
             // from Library to Disk just because Unused hit zero).
-            if (in_array($preset, array('unused', 'orphan', 'uncertain', 'missing', 'used'), true)) {
+            if (in_array($preset, array('unused', 'duplicate', 'orphan', 'uncertain', 'missing', 'used'), true)) {
                 $default_status = $preset;
             }
             ?>
@@ -752,6 +754,7 @@ function devdsame_render_review_tab($s)
             $default_side = $default_status === 'orphan' ? 'disk' : 'library';
             $lib_pills = array(
                 'unused'    => array(__('Unused', 'devdome-safe-media-cleaner'), (int) $s['unused_count']),
+                'duplicate' => array(__('Duplicates', 'devdome-safe-media-cleaner'), (int) $s['duplicate_count']),
                 'uncertain' => array(__('Needs review', 'devdome-safe-media-cleaner'), (int) $s['uncertain_count']),
                 'missing'   => array(__('Missing', 'devdome-safe-media-cleaner'), (int) $s['missing_count']),
                 'used'      => array(__('Used', 'devdome-safe-media-cleaner'), (int) $s['used_count']),

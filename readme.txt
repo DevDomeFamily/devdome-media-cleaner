@@ -4,11 +4,11 @@ Tags: media cleaner, unused images, orphan images, unused attachments, media tra
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.3
+Stable tag: 1.1.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Find unused images and orphan images, view sizes and remove unused media; restore from the Recycle Bin or delete unused images after review.
+Find unused images and orphan images, remove duplicate images from the WordPress media library. Safe trash and recovery workflow.
 
 == Description ==
 
@@ -210,7 +210,7 @@ Yes, the disk scan walks wp-content/uploads and lists orphaned files: images wit
 
 = Does it find duplicate images? =
 
-Not in this version. An identical copy is listed like any other unused or orphan file. A duplicate view that groups copies and suggests which one to keep is planned.
+Yes. Identical copies among the unused images (same file bytes) are listed under Duplicates on the Review screen, with the oldest copy kept as the suggested original. A used image is never marked as a duplicate, and duplicates are never selected automatically.
 
 = How can I free up disk space? =
 
@@ -258,6 +258,12 @@ Not necessarily. An image can be used on your site without being attached to a p
 6. Settings: configure scheduled scans, retention, protection rules, and optional DevDome Monitoring.
 
 == Changelog ==
+
+= 1.1.4 =
+
+* Duplicates: identical copies among the unused images are marked again and listed under a Duplicates pill on the Review screen and a Duplicate images tile on the Overview. The oldest copy is the suggested original; a used image is never marked.
+* Shared DevDome library 1.7.10: the DevDome dashboard icons are printed through the WordPress escaping functions (WordPress.org review rule).
+* Short description rewritten.
 
 = 1.1.3 =
 

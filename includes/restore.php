@@ -202,7 +202,21 @@ function devdsame_restore_item($trash_item_id)
     $si = $wpdb->prefix . 'devdsame_scan_items';
     if ($attach_id > 0) {
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal scan_items update.
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal scan_items update.
         $wpdb->update($si, array('status' => 'unused'), array('attachment_id' => $attach_id, 'status' => 'trashed'), array('%s'), array('%d', '%s'));
+        // Duplicates (1.1.4): the restored file is hashed now (a row scanned while the file sat in the trash has no hash)
+        // and its whole group in the latest scan is decided again by the keeper rule, so a restored copy lands under
+        // Duplicates and a restored original takes its place back.
+        $hash = function_exists('devdsame_file_hash') ? (string) devdsame_file_hash((string) get_attached_file($attach_id)) : '';
+        $sid  = (int) devdsame_latest_scan_id('library');
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal scan_items read; values bound via prepare.
+        $row_id = $sid ? (int) $wpdb->get_var($wpdb->prepare("SELECT id FROM {$si} WHERE scan_id = %d AND attachment_id = %d ORDER BY id DESC LIMIT 1", $sid, $attach_id)) : 0;
+        if ($hash !== '' && $row_id && function_exists('devdsame_remark_hash_group') && !devdsame_remark_hash_group($sid, $row_id, $hash)) {
+            // the file is back either way; the duplicate mark is redone by the next scan, and the failure is on record
+            if (function_exists('devdsame_record_error')) {
+                devdsame_record_error('duplicate_remark_failed', (string) $wpdb->last_error, array('attachment_id' => $attach_id, 'scan_id' => $sid));
+            }
+        }
     } elseif ($item->original_path) {
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal scan_items update.
         $wpdb->update($si, array('status' => 'orphan'), array('file_path' => (string) $item->original_path, 'status' => 'trashed'), array('%s'), array('%s', '%s'));

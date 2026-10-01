@@ -36,6 +36,7 @@ function devdsame_hub_summary()
         'missing_count'          => 0,
         'duplicate_count'        => 0,
         'library_cleanup_bytes'  => 0, // unused + duplicate bytes (Media Library side)
+        'unused_bytes'           => 0, // unused bytes alone (the Unused tile)
         'disk_images_count'      => 0, // image files walked on disk in the last disk scan
         'orphan_bytes'           => 0, // orphan file bytes (disk side)
         'disk_images_bytes'      => 0, // total bytes of all image files walked on disk
@@ -112,12 +113,24 @@ function devdsame_refresh_summary($scan_id = 0, $score = null)
         $failed = $failed || $wpdb->last_error !== '';
         $summary['uncertain_count']     = (int) $row['uncertain_count'];
         $summary['missing_count']       = (int) $row['missing_count'];
-        $summary['duplicate_count']     = (int) $row['duplicate_count'];
+        // Live count too (1.1.4): trashing a duplicate flips it to 'trashed', so the pill and tile drop without a rescan.
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal scan_items count; scan_id bound via prepare.
+        $summary['duplicate_count']     = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$items} WHERE scan_id = %d AND status = 'duplicate'",
+            $sid
+        ));
+        $failed = $failed || $wpdb->last_error !== '';
         $summary['total_library_bytes'] = (int) $row['total_library_bytes'];
         // Library-side cleanup bytes (never includes orphans, even on a full scan).
         // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal scan_items aggregate; scan_id bound via prepare.
         $summary['library_cleanup_bytes'] = (int) $wpdb->get_var($wpdb->prepare(
             "SELECT COALESCE(SUM(file_size), 0) FROM {$items} WHERE scan_id = %d AND status IN ('unused', 'duplicate')",
+            $sid
+        ));
+        $failed = $failed || $wpdb->last_error !== '';
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal scan_items aggregate; scan_id bound via prepare.
+        $summary['unused_bytes'] = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COALESCE(SUM(file_size), 0) FROM {$items} WHERE scan_id = %d AND status = 'unused'",
             $sid
         ));
         $failed = $failed || $wpdb->last_error !== '';

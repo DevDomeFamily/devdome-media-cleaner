@@ -1,4 +1,4 @@
-# DevDome Media Cleaner: Remove Unused Images & Media Library Cleanup
+# DevDome Media Cleaner: Remove Unused Images # DevDome Media Cleaner: Remove Unused Images & Media Library Cleanup Media Library Cleanup
 
 Find unused images and orphan images, view sizes and remove unused media; restore from the Recycle Bin or delete unused images after review. This free WordPress media cleaner runs on your own server, with ZIP backups and one-click restore. No account is required for cleanup.
 
