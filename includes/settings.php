@@ -52,8 +52,20 @@ function devdsame_get_setting($name, $default = '')
     return $value;
 }
 
-/** Write a setting (insert or update). Arrays are serialized. Invalidates the cache. */
+/** Write a setting (insert or update). Arrays are serialized. Invalidates the cache. Refuses inside a failed guard window (DESIGN.md 24). */
 function devdsame_update_setting($name, $value)
+{
+    if (function_exists('devdsame_db_guard_active') && devdsame_db_guard_active()) {
+        return false; // no write after a failed read inside this action
+    }
+    return devdsame_raw_write_setting($name, $value);
+}
+
+/**
+ * The write itself. Only devdsame_update_setting() and devdsame_record_error() call it: the error record is
+ * the one write that must land AFTER a failure (it is how the failure is reported), every other write refuses.
+ */
+function devdsame_raw_write_setting($name, $value)
 {
     global $wpdb;
     $table = devdsame_settings_table();

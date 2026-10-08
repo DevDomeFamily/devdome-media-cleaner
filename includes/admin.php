@@ -280,13 +280,14 @@ function devdsame_handle_settings_save()
         return;
     }
     check_admin_referer('devdsame_settings', '_mcsn');
+    devdsame_db_guard_begin(); // DESIGN.md 24: the redirect below carries mc_err=db when a query failed in here
 
     // No write after a failed read: the form may have been rendered from defaults.
     unset($GLOBALS['devdsame_cache'], $GLOBALS['devdsame_db_failed']);
     devdsame_get_setting('recent_upload_protection_days');
     if (!empty($GLOBALS['devdsame_db_failed'])) {
         wp_safe_redirect(add_query_arg(array('page' => DEVDSAME_PAGE, 'mc_tab' => 'settings', 'mc_err' => 'settings'), admin_url('admin.php')));
-        exit;
+        devdsame_db_guard_end();        exit;
     }
 
     $writes = array();
@@ -333,8 +334,8 @@ function devdsame_handle_settings_save()
     // "Saved" only when every value is in the store afterwards (a failed write is reported, not hidden).
     $failed = devdsame_write_settings($writes);
     $flag = $failed ? array('mc_err' => 'settings') : array('mc_saved' => '1');
-    wp_safe_redirect(add_query_arg(array_merge(array('page' => DEVDSAME_PAGE, 'mc_tab' => 'settings'), $flag), admin_url('admin.php')));
-    exit;
+    wp_safe_redirect(add_query_arg(array_merge(array('page' => DEVDSAME_PAGE, 'mc_tab' => 'settings'), devdsame_db_guard_flag($flag)), admin_url('admin.php')));
+    devdsame_db_guard_end();    exit;
 }
 
 add_action('admin_init', 'devdsame_handle_settings_save');
@@ -346,13 +347,14 @@ function devdsame_handle_restore()
         return;
     }
     check_admin_referer('devdsame_restore', '_mcrn');
+    devdsame_db_guard_begin(); // DESIGN.md 24
     $batch = (int) $_POST['devdsame_restore_batch'];
     $res = $batch ? devdsame_restore_batch($batch) : array('restored' => 0, 'errors' => 1);
     devdsame_refresh_summary();
     // "Restored" only when every file came back; anything else is reported as a problem.
     $flag = ($res['errors'] === 0 && $res['restored'] > 0) ? array('mc_restored' => '1') : array('mc_err' => 'restore');
-    wp_safe_redirect(add_query_arg(array_merge(array('page' => DEVDSAME_PAGE, 'mc_tab' => 'trash'), $flag), admin_url('admin.php')));
-    exit;
+    wp_safe_redirect(add_query_arg(array_merge(array('page' => DEVDSAME_PAGE, 'mc_tab' => 'trash'), devdsame_db_guard_flag($flag)), admin_url('admin.php')));
+    devdsame_db_guard_end();    exit;
 }
 add_action('admin_init', 'devdsame_handle_restore');
 
@@ -363,12 +365,13 @@ function devdsame_handle_delete()
         return;
     }
     check_admin_referer('devdsame_delete', '_mcdn');
+    devdsame_db_guard_begin(); // DESIGN.md 24
     $batch = (int) $_POST['devdsame_delete_batch'];
     $res = $batch ? devdsame_permanent_delete_batch($batch) : array('deleted' => 0, 'errors' => 1);
     devdsame_refresh_summary();
     $flag = ($res['errors'] === 0 && $res['deleted'] > 0) ? array('mc_deleted' => '1') : array('mc_err' => 'delete');
-    wp_safe_redirect(add_query_arg(array_merge(array('page' => DEVDSAME_PAGE, 'mc_tab' => 'trash'), $flag), admin_url('admin.php')));
-    exit;
+    wp_safe_redirect(add_query_arg(array_merge(array('page' => DEVDSAME_PAGE, 'mc_tab' => 'trash'), devdsame_db_guard_flag($flag)), admin_url('admin.php')));
+    devdsame_db_guard_end();    exit;
 }
 add_action('admin_init', 'devdsame_handle_delete');
 
@@ -379,11 +382,12 @@ function devdsame_handle_clear_error()
         return;
     }
     check_admin_referer('devdsame_clear_error', '_mcerr');
+    devdsame_db_guard_begin(); // DESIGN.md 24
     if (function_exists('devdsame_clear_last_error')) {
         devdsame_clear_last_error();
     }
-    wp_safe_redirect(add_query_arg(array('page' => DEVDSAME_PAGE, 'mc_tab' => 'overview'), admin_url('admin.php')));
-    exit;
+    wp_safe_redirect(add_query_arg(array_merge(array('page' => DEVDSAME_PAGE, 'mc_tab' => 'overview'), devdsame_db_guard_flag(array())), admin_url('admin.php')));
+    devdsame_db_guard_end();    exit;
 }
 add_action('admin_init', 'devdsame_handle_clear_error');
 
@@ -437,6 +441,11 @@ function devdsame_render_page()
         $tab = 'overview';
     }
     $base = admin_url('admin.php?page=' . DEVDSAME_PAGE);
+    // DESIGN.md 24: the page is built inside a guard window and buffered; a query that failed while it was
+    // built puts a red banner at the top (devdsame_render_page_banner), so a screen never passes a failed
+    // read off as an empty library, an empty bin or default settings.
+    devdsame_db_guard_begin();
+    ob_start();
     $s = devdsame_hub_summary();
     ?>
     <div class="dd-app min-h-screen bg-gray-50 text-[#3c434a] font-sans text-[13px]">
@@ -470,6 +479,29 @@ function devdsame_render_page()
         </main>
     </div>
     <?php
+    $html = (string) ob_get_clean();
+    $failed = devdsame_db_guard_failed();
+    devdsame_db_guard_end();
+    $banner = devdsame_render_page_banner($failed);
+    if ($banner !== '') {
+        $pos = strpos($html, '<main>');
+        $html = $pos === false ? $banner . $html : substr_replace($html, '<main>' . $banner, $pos, strlen('<main>'));
+    }
+    echo $html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- the buffered page above, every value escaped where it is printed
+}
+
+/**
+ * The DESIGN.md 24 banner: red when a query failed while this page was built (the live error), or the flash
+ * form of the same text when a form handler redirected here with mc_err=db.
+ */
+function devdsame_render_page_banner($failed)
+{
+    $flagged = isset($_GET['mc_err']) && $_GET['mc_err'] === 'db'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only display flag from a PRG redirect.
+    if (!$failed && !$flagged) {
+        return '';
+    }
+    $text = $failed ? devdsame_db_guard_message() : 'A database query failed during this action. The result is not trusted and nothing more was changed: reload the page and check the current state before trying again.';
+    return '<div class="max-w-5xl px-6 pt-6"><div class="dd-banner dd-banner-error' . ($failed ? '' : ' dd-flash') . '">' . esc_html($text) . '</div></div>';
 }
 
 /* ----------------------------- dashboard tab ---------------------------- */

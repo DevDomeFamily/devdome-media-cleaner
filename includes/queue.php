@@ -40,7 +40,16 @@ function devdsame_clear_job()
  */
 function devdsame_record_error($code, $message, $context = array())
 {
+    // The log is appended to what was READ: when that read failed, the list is unknown and is left alone
+    // (a rewrite from the default would wipe it). The latest error is recorded either way, through the raw
+    // writer: this is the one write that must land after a failure (DESIGN.md 24).
+    // Judged by the guard's failure COUNTER, not by $wpdb->last_error: a failed read of the log records a nested
+    // error (devdsame_db_read_failed), whose own write clears last_error before this line is reached.
+    devdsame_db_guard_sync();
+    $log_failures = (int) $GLOBALS['devdsame_db_guard']['count'];
     $log = devdsame_get_array('error_log');
+    devdsame_db_guard_sync();
+    $log_read_ok = (int) $GLOBALS['devdsame_db_guard']['count'] === $log_failures;
     $log[] = array(
         'at'      => time(),
         'code'    => (string) $code,
@@ -50,8 +59,10 @@ function devdsame_record_error($code, $message, $context = array())
     if (count($log) > 50) {
         $log = array_slice($log, -50);
     }
-    devdsame_update_setting('error_log', $log);
-    devdsame_update_setting('last_error', array(
+    if ($log_read_ok) {
+        devdsame_raw_write_setting('error_log', $log);
+    }
+    devdsame_raw_write_setting('last_error', array(
         'at'      => time(),
         'code'    => (string) $code,
         'message' => (string) $message,
@@ -93,7 +104,7 @@ function devdsame_start_job($type, $args = array())
             // A dead clean is not "done": its batch goes back like a cancel (all-or-nothing), and the
             // event is recorded. If the marker cannot be written the dead job stays and blocks.
             if ($existing['type'] === 'trash' && !empty($existing['batch_id'])) {
-                update_option('devdsame_rollback_batch', (string) (int) $existing['batch_id'], false);
+                devdsame_option_write('devdsame_rollback_batch', (string) (int) $existing['batch_id']);
                 if (devdsame_pending_rollback() !== (int) $existing['batch_id']) {
                     return new WP_Error('devdsame_job_running', __('A previous cleanup stopped unexpectedly and could not be rolled back yet. Try again in a moment.', 'devdome-safe-media-cleaner'));
                 }
@@ -202,7 +213,9 @@ function devdsame_tick_key()
     $key = get_option('devdsame_tick_key', '');
     if (!is_string($key) || strlen($key) < 32) {
         $key = wp_generate_password(48, false);
-        update_option('devdsame_tick_key', $key, false);
+        if (!devdsame_option_write('devdsame_tick_key', $key)) {
+            return ''; // a key the row does not hold opens nothing: the loopback falls back to the session check
+        }
     }
     return $key;
 }
@@ -322,7 +335,7 @@ function devdsame_cancel_job()
     // could not record its rollback obligation is refused, and the job simply carries on.
     $rollback_batch = ($job && $job['type'] === 'trash' && !empty($job['batch_id'])) ? (int) $job['batch_id'] : 0;
     if ($rollback_batch) {
-        update_option('devdsame_rollback_batch', (string) $rollback_batch, false);
+        devdsame_option_write('devdsame_rollback_batch', (string) $rollback_batch);
         if (devdsame_pending_rollback() !== $rollback_batch) {
             return false;
         }
@@ -331,11 +344,11 @@ function devdsame_cancel_job()
     // Raise the DB-level cancel flag FIRST. An in-flight tick checks it after its chunk;
     // if the flag went up after we cleared the job, that tick would re-save the old job,
     // resurrect the cancelled clean AND block the rollback from starting (real race).
-    update_option('devdsame_cancelled_at', (string) time(), false);
+    devdsame_option_write('devdsame_cancelled_at', (string) time());
 
     // Name the job being cancelled: an in-flight tick compares its own id, so a cancel in the
     // job's first second is honoured and a cancel can never hit a job started a moment later.
-    update_option('devdsame_cancelled_job', $job ? (string) ($job['id'] ?? '') : '', false);
+    devdsame_option_write('devdsame_cancelled_job', $job ? (string) ($job['id'] ?? '') : '');
     // Both flags must be on disk before the job store is cleared, or an in-flight tick keeps going.
     if ($job && (devdsame_job_cancelled($job) !== true || devdsame_cancelled_since() <= 0)) {
         return false;
@@ -489,6 +502,20 @@ function devdsame_release_tick_lock()
  */
 function devdsame_run_tick()
 {
+    // DESIGN.md 24: the tick runs in its own window. A query that fails inside a chunk pauses the job with the
+    // error on it (devdsame_tick_settle), and ONLY a failure that was recorded and stored is acknowledged
+    // (rebased) there; anything else that failed inside the tick reaches the caller's boundary (a REST poll, an
+    // ability) and is answered as a database error, never as progress.
+    devdsame_db_guard_begin();
+    try {
+        return devdsame_run_tick_inner();
+    } finally {
+        devdsame_db_guard_end();
+    }
+}
+
+function devdsame_run_tick_inner()
+{
     $job = devdsame_get_job();
     // No running job normally means nothing to do — UNLESS a cancel-rollback is pending
     // (post-cancel state has an empty job store; the marker branch below must still run).
@@ -535,8 +562,11 @@ function devdsame_run_tick()
                 // ticks with no browser to close. Three strikes, then stop and say so.
                 $stalls = $ok > 0 ? 0 : (int) get_option('devdsame_rollback_stalls', 0) + 1;
                 if ($stalls >= 3) {
-                    delete_option('devdsame_rollback_batch');
-                    delete_option('devdsame_rollback_stalls');
+                    if (!devdsame_option_delete('devdsame_rollback_batch')) {
+                        devdsame_schedule_tick(5); // the marker could not be cleared for sure: say so next tick, never guess
+                        return $job;
+                    }
+                    devdsame_option_delete('devdsame_rollback_stalls');
                     devdsame_record_error(
                         'rollback_stalled',
                         __('The cancelled cleanup could not be rolled back: the files could not be moved back (check folder permissions on /wp-content/uploads). They are still in the Recycle Bin and can be restored from there.', 'devdome-safe-media-cleaner'),
@@ -544,11 +574,14 @@ function devdsame_run_tick()
                     );
                     return $job;
                 }
-                update_option('devdsame_rollback_stalls', $stalls, false);
+                devdsame_option_write('devdsame_rollback_stalls', $stalls); // a count that did not land is re-counted next tick
                 devdsame_schedule_tick(1);
             } else {
-                delete_option('devdsame_rollback_stalls');
-                delete_option('devdsame_rollback_batch');
+                devdsame_option_delete('devdsame_rollback_stalls');
+                if (!devdsame_option_delete('devdsame_rollback_batch')) {
+                    devdsame_schedule_tick(5); // the marker stays until its removal is proved: the next tick sweeps an empty batch and tries again
+                    return $job;
+                }
                 devdsame_finalize_restore_batch($rb);
                 if (function_exists('devdsame_refresh_summary')) {
                     devdsame_refresh_summary();
@@ -564,6 +597,7 @@ function devdsame_run_tick()
         @set_time_limit(0); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- long-running chunked job tick; each request processes one bounded slice.
         $chunk = max(25, min(1000, devdsame_get_int('scan_chunk_size', 200)));
 
+        $stage_mark = devdsame_db_guard_count(); // the stage is judged by what fails from here on
         if ($job['type'] === 'scan' || $job['type'] === 'preview') {
             $job = devdsame_tick_scan($job, $chunk);
         } elseif ($job['type'] === 'trash') {
@@ -578,49 +612,92 @@ function devdsame_run_tick()
             $job = devdsame_tick_backup_restore($job, $chunk);
         }
 
-        // A cancel may have arrived from another request while this chunk was running — honour
-        // it instead of resurrecting the job from our stale copy. The rollback marker (if any)
-        // is serviced by the NEXT tick; schedule one so it starts without waiting for a poll.
-        if (devdsame_job_cancelled($job) === true) { // null (read failed) keeps the job: the next tick re-checks before any item
-            $stored = devdsame_get_job();
-            if ($stored && (string) ($stored['id'] ?? '') === (string) ($job['id'] ?? '') && $stored['type'] === $job['type']) {
-                devdsame_clear_job();
-            }
-            if (devdsame_pending_rollback()) {
-                devdsame_schedule_tick(1);
-            }
-            return null;
-        }
-
-        $job['updated_at'] = time();
-        devdsame_save_job($job);
-
-        // A clean completion proves any earlier surfaced error is stale — stop showing it.
-        if ($job['status'] === 'completed' && (int) $job['errors'] === 0 && function_exists('devdsame_clear_last_error')) {
-            devdsame_clear_last_error();
-        }
-
-        // Surface a persistent "some files were skipped" notice once a destructive job finishes
-        // with skip-on-error items, so the user can view details / export the log (spec error UX).
-        if ($job['status'] === 'completed' && (int) $job['errors'] > 0
-            && in_array($job['type'], array('trash', 'restore', 'delete'), true)) {
-            devdsame_record_error(
-                $job['type'] . '_skipped',
-                sprintf(
-                    /* translators: 1: count of skipped files, 2: job type. */
-                    __('%1$d file(s) were skipped during the %2$s operation (already gone, locked, or became referenced). The rest completed.', 'devdome-safe-media-cleaner'),
-                    (int) $job['errors'],
-                    $job['type']
-                ),
-                array('processed' => (int) $job['processed'], 'errors' => (int) $job['errors'], 'batch_id' => (int) $job['batch_id'])
-            );
-        }
-
-        if ($job['status'] === 'running') {
-            devdsame_schedule_tick(1);
-        }
+        $job = devdsame_tick_settle($job, devdsame_db_guard_count() > $stage_mark, $stage_mark);
     } finally {
         devdsame_release_tick_lock();
+    }
+    return $job;
+}
+
+/**
+ * Store what one stage left behind. With $stage_failed (DESIGN.md 24: a query failed inside the chunk, so its
+ * result is not trusted) the job pauses with the error on it (a stage that already failed on its own stays
+ * failed), the failure is recorded, nothing is finalised and no next tick is scheduled; Resume runs the chunk
+ * again. The concurrent-cancel check runs FIRST either way, so a cancel that cleared the job is never
+ * overwritten by a stale paused copy. The failure is acknowledged (rebased out of the caller's window) only
+ * once the paused job is stored; until then it reaches the boundary.
+ */
+function devdsame_tick_settle($job, $stage_failed, $stage_mark = 0)
+{
+    $why = '';
+    $prev_mark = (int) $GLOBALS['devdsame_db_guard']['mark']; // where the caller's window stood: a failure before the stage is the caller's to report
+    if ($stage_failed) {
+        $why = devdsame_db_guard_message();
+        devdsame_db_guard_rebase(); // the report below (record + pause) is not refused by the failure it reports
+        devdsame_record_error('db_failed', $why, array('type' => is_array($job) ? (string) $job['type'] : '', 'cursor' => is_array($job) ? (int) $job['cursor'] : 0));
+    }
+
+    // A cancel may have arrived from another request while this chunk was running — honour
+    // it instead of resurrecting the job from our stale copy. The rollback marker (if any)
+    // is serviced by the NEXT tick; schedule one so it starts without waiting for a poll.
+    if (devdsame_job_cancelled($job) === true) { // null (read failed) keeps the job: the next tick re-checks before any item
+        $stored = devdsame_get_job();
+        if ($stored && (string) ($stored['id'] ?? '') === (string) ($job['id'] ?? '') && $stored['type'] === $job['type']) {
+            devdsame_clear_job();
+        }
+        if (devdsame_pending_rollback()) {
+            devdsame_schedule_tick(1);
+        }
+        if ($stage_failed && (int) $stage_mark > $prev_mark) {
+            $GLOBALS['devdsame_db_guard']['mark'] = $prev_mark; // the cancel stored nothing: a failure before the stage is still the caller's to report
+        }
+        return null;
+    }
+
+    if ($stage_failed) {
+        if (is_array($job) && $job['status'] !== 'error') {
+            $job['status'] = 'paused';
+            $job['message'] = $why;
+        }
+        $saved = false;
+        if (is_array($job)) {
+            $job['updated_at'] = time();
+            $saved = devdsame_save_job($job);
+        }
+        if (!$saved || (int) $stage_mark > $prev_mark) {
+            // Not stored, or a failure BEFORE the stage was never reported by anyone: the caller's boundary keeps
+            // seeing it. Only the stage's own failure, stored as the pause, is acknowledged.
+            $GLOBALS['devdsame_db_guard']['mark'] = $prev_mark;
+        }
+        return $job;
+    }
+
+    $job['updated_at'] = time();
+    devdsame_save_job($job);
+
+    // A clean completion proves any earlier surfaced error is stale — stop showing it.
+    if ($job['status'] === 'completed' && (int) $job['errors'] === 0 && function_exists('devdsame_clear_last_error')) {
+        devdsame_clear_last_error();
+    }
+
+    // Surface a persistent "some files were skipped" notice once a destructive job finishes
+    // with skip-on-error items, so the user can view details / export the log (spec error UX).
+    if ($job['status'] === 'completed' && (int) $job['errors'] > 0
+        && in_array($job['type'], array('trash', 'restore', 'delete'), true)) {
+        devdsame_record_error(
+            $job['type'] . '_skipped',
+            sprintf(
+                /* translators: 1: count of skipped files, 2: job type. */
+                __('%1$d file(s) were skipped during the %2$s operation (already gone, locked, or became referenced). The rest completed.', 'devdome-safe-media-cleaner'),
+                (int) $job['errors'],
+                $job['type']
+            ),
+            array('processed' => (int) $job['processed'], 'errors' => (int) $job['errors'], 'batch_id' => (int) $job['batch_id'])
+        );
+    }
+
+    if ($job['status'] === 'running') {
+        devdsame_schedule_tick(1);
     }
     return $job;
 }
@@ -736,6 +813,9 @@ function devdsame_tick_trash($job, $chunk)
             return $job;
         }
         $r = devdsame_trash_item($job['batch_id'], (int) $item_id);
+        if (is_wp_error($r) && $r->get_error_code() === 'devdsame_db_error') {
+            return $job; // DESIGN.md 24: refused after a failed read; the cursor stays here so Resume retries this item
+        }
         if (is_wp_error($r)) {
             $job['errors']++;
         }

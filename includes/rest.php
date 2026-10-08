@@ -18,7 +18,7 @@ function devdsame_register_routes()
 
     register_rest_route($ns, '/start-scan', array(
         'methods'             => 'POST',
-        'callback'            => 'devdsame_rest_start_scan',
+        'callback'            => devdsame_rest_guarded('devdsame_rest_start_scan'),
         'permission_callback' => $perm,
         'args'                => array(
             'mode'  => array('type' => 'string', 'default' => 'scan'),
@@ -28,7 +28,7 @@ function devdsame_register_routes()
 
     register_rest_route($ns, '/start-backup', array(
         'methods'             => 'POST',
-        'callback'            => 'devdsame_rest_start_backup',
+        'callback'            => devdsame_rest_guarded('devdsame_rest_start_backup'),
         'permission_callback' => $perm,
         'args'                => array(
             'scope' => array('type' => 'string', 'default' => 'library'),
@@ -37,44 +37,44 @@ function devdsame_register_routes()
 
     register_rest_route($ns, '/upload-backup', array(
         'methods'             => 'POST',
-        'callback'            => 'devdsame_rest_upload_backup',
+        'callback'            => devdsame_rest_guarded('devdsame_rest_upload_backup'),
         'permission_callback' => $perm,
     ));
 
     register_rest_route($ns, '/clear-trash-history', array(
         'methods'             => 'POST',
-        'callback'            => 'devdsame_rest_clear_trash_history',
+        'callback'            => devdsame_rest_guarded('devdsame_rest_clear_trash_history'),
         'permission_callback' => $perm,
     ));
 
     register_rest_route($ns, '/restore-backup', array(
         'methods'             => 'POST',
-        'callback'            => 'devdsame_rest_restore_backup',
+        'callback'            => devdsame_rest_guarded('devdsame_rest_restore_backup'),
         'permission_callback' => $perm,
     ));
 
     register_rest_route($ns, '/clean', array(
         'methods'             => 'POST',
-        'callback'            => 'devdsame_rest_clean',
+        'callback'            => devdsame_rest_guarded('devdsame_rest_clean'),
         'permission_callback' => $perm,
     ));
 
     register_rest_route($ns, '/scan-progress', array(
         'methods'             => 'GET',
-        'callback'            => 'devdsame_rest_progress',
+        'callback'            => devdsame_rest_guarded('devdsame_rest_progress'),
         'permission_callback' => $perm,
     ));
 
     // The loopback runner's route: advances one slice with no user session (internal key).
     register_rest_route($ns, '/tick', array(
         'methods'             => 'POST',
-        'callback'            => 'devdsame_rest_tick',
+        'callback'            => devdsame_rest_guarded('devdsame_rest_tick'),
         'permission_callback' => 'devdsame_rest_permission_tick',
     ));
 
     register_rest_route($ns, '/job-control', array(
         'methods'             => 'POST',
-        'callback'            => 'devdsame_rest_job_control',
+        'callback'            => devdsame_rest_guarded('devdsame_rest_job_control'),
         'permission_callback' => $perm,
         'args'                => array(
             'action' => array('type' => 'string', 'required' => true),
@@ -83,31 +83,31 @@ function devdsame_register_routes()
 
     register_rest_route($ns, '/scan-results', array(
         'methods'             => 'GET',
-        'callback'            => 'devdsame_rest_results',
+        'callback'            => devdsame_rest_guarded('devdsame_rest_results'),
         'permission_callback' => $perm,
     ));
 
     register_rest_route($ns, '/trash', array(
         'methods'             => 'POST',
-        'callback'            => 'devdsame_rest_trash',
+        'callback'            => devdsame_rest_guarded('devdsame_rest_trash'),
         'permission_callback' => $perm,
     ));
 
     register_rest_route($ns, '/restore', array(
         'methods'             => 'POST',
-        'callback'            => 'devdsame_rest_restore',
+        'callback'            => devdsame_rest_guarded('devdsame_rest_restore'),
         'permission_callback' => $perm,
     ));
 
     register_rest_route($ns, '/permanent-delete', array(
         'methods'             => 'POST',
-        'callback'            => 'devdsame_rest_delete',
+        'callback'            => devdsame_rest_guarded('devdsame_rest_delete'),
         'permission_callback' => $perm,
     ));
 
     register_rest_route($ns, '/protect', array(
         'methods'             => 'POST',
-        'callback'            => 'devdsame_rest_protect',
+        'callback'            => devdsame_rest_guarded('devdsame_rest_protect'),
         'permission_callback' => $perm,
     ));
 }
@@ -154,6 +154,7 @@ function devdsame_rest_tick(WP_REST_Request $request)
     }
     devdsame_internal_tick();
     if ($detached) {
+        devdsame_db_guard_end(); // the wrapper's finally never runs after exit
         exit;
     }
     return rest_ensure_response(devdsame_job_progress());

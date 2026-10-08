@@ -20,7 +20,7 @@ if (defined('DEVDCOREV1_LOADED')) {
     return; // a higher/equal version already loaded the library
 }
 define('DEVDCOREV1_LOADED', true);
-define('DEVDCOREV1_VERSION', '1.7.10');
+define('DEVDCOREV1_VERSION', '1.7.12');
 
 if (!defined('DEVDCOREV1_FEED_ENDPOINT')) {
     define('DEVDCOREV1_FEED_ENDPOINT', 'https://api.devdome.com/bot-protection');
@@ -294,12 +294,43 @@ if (!function_exists('devdcorev1_get_feeds')) {
     }
     add_action('rest_api_init', 'devdcorev1_beacon_rest_init');
 
+    /**
+     * Cloudflare edge ranges, copied from https://www.cloudflare.com/ips-v4/ and /ips-v6/ on 2026-10-02
+     * (core 1.7.12). Shipped, never fetched at runtime; refreshed with core releases.
+     */
+    function devdcorev1_cloudflare_cidrs()
+    {
+        return array(
+            '173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22', '141.101.64.0/18',
+            '108.162.192.0/18', '190.93.240.0/20', '188.114.96.0/20', '197.234.240.0/22', '198.41.128.0/17',
+            '162.158.0.0/15', '104.16.0.0/13', '104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22',
+            '2400:cb00::/32', '2606:4700::/32', '2803:f800::/32', '2405:b500::/32', '2405:8100::/32',
+            '2a06:98c0::/29', '2c0f:f248::/32',
+        );
+    }
+
+    /** True only when the TCP peer (REMOTE_ADDR) is a Cloudflare edge. Cached per request. */
+    function devdcorev1_peer_is_cloudflare()
+    {
+        static $cached = null;
+        if ($cached !== null) {
+            return $cached;
+        }
+        $peer = isset($_SERVER['REMOTE_ADDR']) ? filter_var(trim(sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR']))), FILTER_VALIDATE_IP) : false;
+        if (false === $peer) {
+            return $cached = false;
+        }
+        $idx = devdcorev1_build_cidr_index(devdcorev1_cloudflare_cidrs());
+        return $cached = devdcorev1_ip_in_cidr_index($peer, $idx['v4'], $idx['v6']);
+    }
+
     /** Client IP for the beacon (Cloudflare-aware). */
     function devdcorev1_request_ip()
     {
-        // CF-Connecting-IP is believed only when a plugin vouches that the peer is Cloudflare (the bot-protection
-        // plugin checks REMOTE_ADDR against the published ranges); otherwise anyone could name a victim address.
-        $trust_cf = (bool) apply_filters('devdcorev1_trust_cf_ip', false);
+        // CF-Connecting-IP is believed only when the peer really is Cloudflare: the core checks REMOTE_ADDR against the
+        // shipped edge ranges (core 1.7.12, DeepSeek core round 1), and a plugin may still vouch through the filter.
+        // Otherwise anyone could name a victim address by sending the header themselves.
+        $trust_cf = (bool) apply_filters('devdcorev1_trust_cf_ip', devdcorev1_peer_is_cloudflare());
         foreach ($trust_cf ? array('HTTP_CF_CONNECTING_IP', 'REMOTE_ADDR') : array('REMOTE_ADDR') as $h) {
             if (!empty($_SERVER[$h])) {
                 // FILTER_VALIDATE_IP is the real sanitizer here: anything that is not a literal
@@ -512,5 +543,6 @@ if (!function_exists('devdcorev1_get_feeds')) {
     }
     if (file_exists(__DIR__ . '/hub-install-selfhost.php')) {
         require_once __DIR__ . '/hub-install-selfhost.php';
+    require_once __DIR__ . '/hub-telemetry.php'; // opt-in "Help improve DevDome" usage reports, core 1.7.12
     }
 }

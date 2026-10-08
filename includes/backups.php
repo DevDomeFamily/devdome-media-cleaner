@@ -836,6 +836,7 @@ function devdsame_handle_backup_actions()
         return;
     }
     check_admin_referer('devdsame_backup', '_mcbk');
+    devdsame_db_guard_begin(); // DESIGN.md 24: the redirect below carries mc_err=db when a query failed in here
     $action = sanitize_key(wp_unslash($_POST['devdsame_backup_action']));
     $id = isset($_POST['backup_id']) ? sanitize_text_field(wp_unslash($_POST['backup_id'])) : '';
     $notice = '';
@@ -846,8 +847,8 @@ function devdsame_handle_backup_actions()
         $notice = devdsame_handle_backup_upload_file();
     }
 
-    wp_safe_redirect(add_query_arg(array('page' => DEVDSAME_PAGE, 'mc_tab' => 'backup', 'mc_bk' => $notice), admin_url('admin.php')));
-    exit;
+    wp_safe_redirect(add_query_arg(array_merge(array('page' => DEVDSAME_PAGE, 'mc_tab' => 'backup'), devdsame_db_guard_flag(array('mc_bk' => $notice))), admin_url('admin.php')));
+    devdsame_db_guard_end();    exit;
 }
 add_action('admin_init', 'devdsame_handle_backup_actions');
 

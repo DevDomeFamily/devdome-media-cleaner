@@ -190,7 +190,7 @@ function devdsame_register_abilities()
             'category'            => 'devdome-safe-media-cleaner',
             'input_schema'        => $in,
             'output_schema'       => $out,
-            'execute_callback'    => $cb,
+            'execute_callback'    => function ($input = array()) use ($cb) { return devdsame_ability_guarded($cb, $input); }, // DESIGN.md 24
             'permission_callback' => 'devdsame_ability_can',
             'meta'                => devdsame_ability_meta($kind),
         ));

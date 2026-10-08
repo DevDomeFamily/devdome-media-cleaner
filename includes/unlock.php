@@ -55,7 +55,9 @@ function devdsame_site_identity()
     $token = (string) get_option('devdcorev1_site_token', '');
     if ($token === '') {
         $token = wp_generate_password(40, false);
-        update_option('devdcorev1_site_token', $token);
+        if (!devdsame_option_write('devdcorev1_site_token', $token)) {
+            $token = ''; // DESIGN.md 24.5: a token the row does not hold is no token (the server would register one the site cannot present)
+        }
     }
     return array('site' => $site, 'token' => $token);
 }

@@ -4,7 +4,7 @@ Tags: media cleaner, unused images, orphan images, unused attachments, media tra
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.4
+Stable tag: 1.1.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -258,6 +258,14 @@ Not necessarily. An image can be used on your site without being attached to a p
 6. Settings: configure scheduled scans, retention, protection rules, and optional DevDome Monitoring.
 
 == Changelog ==
+
+= 1.1.5 =
+
+* Network uninstall now clears the shared DevDome connection state on every site of the network, not only the last one visited.
+* Database guard: every action (the review screen, cleanups, restores, deletes, the admin page, the scheduled sweep, the Abilities API) now records a failed database query and refuses to write, move or delete anything after it. The screen says that a query failed instead of showing an empty library, an empty Recycle Bin or default settings, and a running job pauses with the error on it so you can resume it.
+* State options (the cancel and rollback markers, the runner key, the site token) are read back after every write; a value that did not land is treated as not saved.
+* Shared DevDome library 1.7.11: on a multisite network a site mapped to its own domain is its own site and no longer shares the network's DevDome connection.
+* Shared DevDome library 1.7.12: a Cloudflare visitor address header is trusted only when the connection itself comes from a Cloudflare address, so a forged header from anywhere else is ignored.
 
 = 1.1.4 =
 

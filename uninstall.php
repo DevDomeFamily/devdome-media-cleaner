@@ -80,11 +80,15 @@ function devdsame_uninstall_site()
 }
 
 global $wpdb;
+// Shared-core cleanup runs PER BLOG too: the connection state (site ID, site token, account,
+// connection cache, telemetry consent) is stored per blog, so a network uninstall must visit every blog.
+require_once __DIR__ . '/lib/devdome-core/uninstall.php';
 if (is_multisite()) {
     $devdsame_sites = get_sites(array('fields' => 'ids', 'number' => 0));
     foreach ($devdsame_sites as $blog_id) {
         switch_to_blog((int) $blog_id);
         devdsame_uninstall_site();
+        devdcorev1_uninstall_cleanup('devdome-safe-media-cleaner/devdome-safe-media-cleaner.php');
         restore_current_blog();
     }
 } else {

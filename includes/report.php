@@ -536,6 +536,16 @@ function devdsame_export_trash($format)
 /** Daily cron: kick a background scan on the chosen weekly/monthly cadence. */
 function devdsame_scheduled_scan_dispatch()
 {
+    devdsame_db_guard_begin(); // DESIGN.md 24
+    try {
+        devdsame_scheduled_scan_dispatch_run();
+    } finally {
+        devdsame_db_guard_end();
+    }
+}
+
+function devdsame_scheduled_scan_dispatch_run()
+{
     // "Every N days" (0 = off). Back-compat: old weekly/monthly string maps to 7/30.
     $days = devdsame_get_int('scheduled_scan_days', 0);
     if (!$days) {

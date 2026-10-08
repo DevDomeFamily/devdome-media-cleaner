@@ -142,6 +142,9 @@ function devdsame_create_trash_batch($user_id = 0, $note = '')
 function devdsame_trash_item($batch_id, $item_id)
 {
     global $wpdb;
+    if (devdsame_db_guard_active()) {
+        return new WP_Error('devdsame_db_error', devdsame_db_guard_message()); // DESIGN.md 24: no move after a failed read inside this action
+    }
     $items = $wpdb->prefix . 'devdsame_scan_items';
 
     // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal scan_items read; id bound via prepare.

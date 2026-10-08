@@ -267,6 +267,9 @@ function devdsame_finalize_restore_batch($batch_id)
 function devdsame_permanent_delete_item($trash_item_id)
 {
     global $wpdb;
+    if (devdsame_db_guard_active()) {
+        return new WP_Error('devdsame_db_error', devdsame_db_guard_message()); // DESIGN.md 24: no delete after a failed read inside this action
+    }
     $ti = $wpdb->prefix . 'devdsame_trash_items';
     // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- internal trash_items read; id bound via prepare.
     $item = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$ti} WHERE id = %d", (int) $trash_item_id));
@@ -426,6 +429,16 @@ function devdsame_finalize_delete_batch($batch_id)
  * permanent_delete_after has elapsed, in bounded slices, only when auto-delete is enabled.
  */
 function devdsame_autodelete_sweep()
+{
+    devdsame_db_guard_begin(); // DESIGN.md 24: the cron sweep deletes files, so it runs inside a window
+    try {
+        devdsame_autodelete_sweep_run();
+    } finally {
+        devdsame_db_guard_end();
+    }
+}
+
+function devdsame_autodelete_sweep_run()
 {
     $days = devdsame_get_int('auto_delete_after_days', 0);
     if ($days <= 0) {
