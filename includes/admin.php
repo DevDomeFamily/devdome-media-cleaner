@@ -449,6 +449,7 @@ function devdsame_render_page()
     $s = devdsame_hub_summary();
     ?>
     <div class="dd-app min-h-screen bg-gray-50 text-[#3c434a] font-sans text-[13px]">
+        <?php if (function_exists('devdcorev1_analytics_card')) { devdcorev1_analytics_card(); } ?>
         <div class="bg-white border-b border-gray-200 shadow-sm">
             <div class="max-w-5xl px-6 py-4 flex items-center gap-3">
                 <div class="p-1.5 rounded text-white inline-flex items-center justify-center" style="background:linear-gradient(135deg,#2563eb,#1d4ed8);"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="8.5" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/><path d="M16.6 5.4l.8 1.8 1.8.8-1.8.8-.8 1.8-.8-1.8-1.8-.8 1.8-.8z" fill="currentColor" stroke="none"/></svg></div>

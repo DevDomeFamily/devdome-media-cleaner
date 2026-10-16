@@ -20,7 +20,7 @@ if (defined('DEVDCOREV1_LOADED')) {
     return; // a higher/equal version already loaded the library
 }
 define('DEVDCOREV1_LOADED', true);
-define('DEVDCOREV1_VERSION', '1.7.12');
+define('DEVDCOREV1_VERSION', '1.7.13');
 
 if (!defined('DEVDCOREV1_FEED_ENDPOINT')) {
     define('DEVDCOREV1_FEED_ENDPOINT', 'https://api.devdome.com/bot-protection');
@@ -344,6 +344,22 @@ if (!function_exists('devdcorev1_get_feeds')) {
         return '';
     }
 
+    /** Delete this guard's expired transient pairs (the value row and its timeout row), nothing else. */
+    function devdcorev1_beacon_rate_sweep()
+    {
+        global $wpdb;
+        $like = $wpdb->esc_like('_transient_timeout_devdcorev1_beacon_rate_') . '%';
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- scoped sweep of this library's own expired transients, the way core's delete_expired_transients() works.
+        $wpdb->query($wpdb->prepare(
+            "DELETE a, b FROM {$wpdb->options} a, {$wpdb->options} b
+             WHERE a.option_name LIKE %s
+               AND b.option_name = CONCAT('_transient_', SUBSTRING(a.option_name, 20))
+               AND a.option_value < %d",
+            $like,
+            time()
+        ));
+    }
+
     /**
      * Receive one beacon: parse + classify, then re-broadcast to listeners via the
      * `devdcorev1_beacon` action. Core stores NOTHING — each plugin decides what to do with it
@@ -364,15 +380,31 @@ if (!function_exists('devdcorev1_get_feeds')) {
         // to Cloudflare origin may opt in to the CF header via DEVDCOREV1_TRUST_CF_IP.
         // FILTER_VALIDATE_IP sanitizes the transport peer; a non-IP value (impossible from a real
         // TCP peer) collapses into the shared '' bucket, which is still rate-limited.
-        $bucket_ip = (defined('DEVDCOREV1_TRUST_CF_IP') && DEVDCOREV1_TRUST_CF_IP)
+        // Core audit 2026-10-16: since 1.7.12 devdcorev1_request_ip() returns the CF-Connecting-IP header ONLY
+        // when the TCP peer is a verified Cloudflare edge (shipped ranges) and REMOTE_ADDR otherwise, so $ip can
+        // no longer be minted by a rotated header. Bucket on it: before this, every visitor behind the same
+        // Cloudflare edge shared one 120/min bucket and a busy site dropped real beacons as a flood.
+        $bucket_ip = $ip !== ''
             ? $ip
             : (string) filter_var(isset($_SERVER['REMOTE_ADDR']) ? trim(sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR']))) : '', FILTER_VALIDATE_IP);
-        $key = 'devdcorev1_beacon_rate_' . md5($bucket_ip) . '_' . (int) floor(time() / 60);
-        $n = (int) get_transient($key);
-        if ($n >= 120) {
+        // One bucket per IP that resets every minute, not one per IP per minute (core audit 2026-10-16):
+        // the old key carried the minute, so without an object cache every IP minted two fresh wp_options
+        // rows a minute that sat expired until WordPress's daily sweep (half of all beacon rows on a fleet
+        // site). Now a returning IP reuses its row, and about one request in fifty removes the expired ones.
+        $key = 'devdcorev1_beacon_rate_' . md5($bucket_ip);
+        $minute = (int) floor(time() / 60);
+        $b = get_transient($key);
+        if (!is_array($b) || !isset($b['m'], $b['n']) || (int) $b['m'] !== $minute) {
+            $b = array('m' => $minute, 'n' => 0);
+        }
+        if ((int) $b['n'] >= 120) {
             return new WP_REST_Response(array('ok' => true), 202); // accepted, dropped
         }
-        set_transient($key, $n + 1, 120);
+        $b['n'] = (int) $b['n'] + 1;
+        set_transient($key, $b, 120);
+        if (!wp_using_ext_object_cache() && 1 === wp_rand(1, 50)) {
+            devdcorev1_beacon_rate_sweep();
+        }
 
         $flag = static function ($k) use ($req) { return $req->get_param($k) ? 1 : 0; };
         $cookie     = $flag('c');

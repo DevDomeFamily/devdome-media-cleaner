@@ -4,7 +4,7 @@ Tags: media cleaner, unused images, orphan images, unused attachments, media tra
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.5
+Stable tag: 1.1.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -259,6 +259,12 @@ Not necessarily. An image can be used on your site without being attached to a p
 
 == Changelog ==
 
+= 1.1.6 =
+
+* A dismissible note at the top of the settings page mentions the free DevDome Analytics plugin, with a button that opens the plugin installer (or the Analytics screen when it is already active). Dismiss hides it for good.
+* Shared DevDome library 1.7.13: uninstalling the last DevDome plugin also removes the note's dismissal, the update-repair records and the per-user "Report a bug" flag; the visitor-beacon flood guard keeps one short-lived record per address and clears its expired ones itself, and behind Cloudflare it counts per visitor instead of per Cloudflare address.
+* Deleting the plugin also removes its one-time migration marker and the cached update-check answer it kept in the database. The marker was loaded on every request after the plugin was gone.
+
 = 1.1.5 =
 
 * Network uninstall now clears the shared DevDome connection state on every site of the network, not only the last one visited.
@@ -305,3 +311,11 @@ Not necessarily. An image can be used on your site without being attached to a p
 
 = 1.0.7 =
 * Bundled DevDome core updated to 1.6.2: the DevDome Dashboard shows the new Affiliate Manager logo.
+
+== Upgrade Notice ==
+
+= 1.1.6 =
+Housekeeping release. Scans, the Recycle Bin and the screen are unchanged.
+
+= 1.1.5 =
+Database guard on every action, network uninstall clears every site, shared DevDome library 1.7.12. Your Recycle Bin and settings are unaffected.
