@@ -375,8 +375,15 @@ add_action('admin_post_devdsame_export', 'devdsame_handle_export');
  */
 function devdsame_csv_cell($value)
 {
+    // Security review 2026-10-19 (#15): Link Monitor's guard. Leading ASCII control/space bytes, the UTF-8 BOM
+    // and the common Unicode spaces are stripped first (spreadsheets skip them), control bytes elsewhere are
+    // removed, and | counts as a formula start.
     $v = (string) $value;
-    if ($v !== '' && in_array($v[0], array('=', '+', '-', '@', "\t", "\r"), true)) {
+    if ('' !== $v) {
+        $v = preg_replace('~^(?:[\x00-\x20]|\xEF\xBB\xBF|\xC2\xA0|\xE2\x80[\x80-\x8B\xAF]|\xE2\x81\x9F|\xE3\x80\x80)+~', '', $v);
+        $v = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $v);
+    }
+    if ($v !== '' && in_array($v[0], array('=', '+', '-', '@', "\t", "\r", '|'), true)) {
         $v = "'" . $v;
     }
     return '"' . str_replace('"', '""', $v) . '"';

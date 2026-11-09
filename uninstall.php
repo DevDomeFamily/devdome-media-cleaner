@@ -15,6 +15,7 @@ defined('WP_UNINSTALL_PLUGIN') || exit;
 /** Per-site cleanup (called once per site on multisite, or once on single-site). */
 function devdsame_uninstall_site()
 {
+    delete_transient('devdsame_activation_redirect'); // the first-activation redirect flag (60 s), gone anyway
     global $wpdb;
     $p = $wpdb->prefix . 'devdsame_';
 

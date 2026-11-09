@@ -4,7 +4,7 @@ Tags: media cleaner, unused images, orphan images, unused attachments, media tra
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.6
+Stable tag: 1.1.7
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -257,7 +257,26 @@ Not necessarily. An image can be used on your site without being attached to a p
 5. Backup and Restore: create, upload, download, and restore ZIP media backups.
 6. Settings: configure scheduled scans, retention, protection rules, and optional DevDome Monitoring.
 
+== Source code ==
+
+All of this plugin's PHP and JavaScript ships unminified and human-readable.
+
+One file is generated: `assets/devdome-tools-tw.css`, the admin screen's utility stylesheet (`assets/admin.css` is hand-written and ships as-is). It is a Tailwind CSS v3 utility bundle built from `src/tw.css` and `tailwind.config.cjs` with:
+
+`npx tailwindcss -c tailwind.config.cjs -i src/tw.css -o assets/devdome-tools-tw.css --minify`
+
+Those two build inputs are not included in the distributed package. Ask for them at https://devdome.com/contact and we will send them.
+
 == Changelog ==
+
+= 1.1.7 =
+
+* Overview: the five library numbers (total, used, unused, possible cleanup, duplicates) sit in one row.
+* Shared DevDome library 1.7.17: the connect beacon's flood guard counts an IPv6 visitor per /64 network, and the one-click install of another DevDome plugin verifies the downloaded package against the published checksum before installing.
+* Hardening (security review): a restore refuses names with a risky inner extension (x.php.jpg) and checks that the bytes really are the image the name says before writing; the CSV export guard skips leading spaces and byte-order marks and covers the pipe character.
+* The first activation opens the plugin screen once: the DevDome Account card when the site is not connected yet, the Overview when it is. Bulk activations never redirect.
+* The update-settings ability is marked as a change that cannot be undone, so an AI assistant connected through MCP asks before running it.
+* Shared DevDome library 1.7.16: the connect request to devdome.com stays valid for 60 minutes instead of 20, and the DevDome Tools page asks the server again while a request this site started is still open, so a connection authorized in a tab that never came back still completes; the Tools page notes when DevDome Analytics is not installed; the Analytics note styles are registered through WordPress instead of a style block in the page; one shared helper reads the visitor address behind a trusted proxy; the AI Assistant is listed in the plugin catalog. After connecting, the screen you land on says which account the site is connected to and the one next step.
 
 = 1.1.6 =
 
@@ -313,6 +332,9 @@ Not necessarily. An image can be used on your site without being attached to a p
 * Bundled DevDome core updated to 1.6.2: the DevDome Dashboard shows the new Affiliate Manager logo.
 
 == Upgrade Notice ==
+
+= 1.1.7 =
+Shared DevDome library 1.7.16 (connect request valid for 60 minutes). Scans and deletions are unaffected.
 
 = 1.1.6 =
 Housekeeping release. Scans, the Recycle Bin and the screen are unchanged.

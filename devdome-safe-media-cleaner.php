@@ -3,7 +3,7 @@
 Plugin Name: DevDome Safe Media Cleaner
 Plugin URI: https://devdome.com/
 Description: Safely find and remove unused WordPress images with visual review, confidence scoring, Recycle Bin and one-click restore. Part of the DevDome suite.
-Version: 1.1.6
+Version: 1.1.7
 Author: DevDome
 Author URI: https://devdome.com
 Text Domain: devdome-safe-media-cleaner
@@ -23,7 +23,7 @@ if (file_exists(__DIR__ . '/wporg-build.php')) {
     require __DIR__ . '/wporg-build.php';
 }
 
-define('DEVDSAME_VERSION', '1.1.6');
+define('DEVDSAME_VERSION', '1.1.7');
 define('DEVDSAME_DIR', plugin_dir_path(__FILE__));
 define('DEVDSAME_URL', plugin_dir_url(__FILE__));
 define('DEVDSAME_FILE', __FILE__);
@@ -211,6 +211,21 @@ add_filter('devdcorev1_media_signals', function ($signals) {
     return $signals;
 });
 
+// First activation (install.php sets the transient): open this plugin's screen once, the DevDome Account card
+// when the site is not linked yet. Bulk activation, AJAX, cron and WP-CLI never redirect.
+add_action('admin_init', function () {
+    if (!get_transient('devdsame_activation_redirect')) {
+        return;
+    }
+    delete_transient('devdsame_activation_redirect');
+    // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only: a bulk activation never redirects.
+    if (isset($_GET['activate-multi']) || wp_doing_ajax() || wp_doing_cron() || (defined('WP_CLI') && WP_CLI) || !current_user_can('activate_plugins')) {
+        return;
+    }
+    $connected = function_exists('devdcorev1_account_is_connected') && devdcorev1_account_is_connected();
+    wp_safe_redirect($connected ? admin_url('admin.php?page=' . 'devdome-safe-media-cleaner') : admin_url('admin.php?page=' . 'devdome-safe-media-cleaner' . '&mc_tab=settings#settings'));
+    exit;
+});
 register_activation_hook(__FILE__, 'devdsame_activate');
 register_deactivation_hook(__FILE__, 'devdsame_deactivate');
 

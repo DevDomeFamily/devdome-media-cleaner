@@ -84,6 +84,12 @@ add_action('admin_enqueue_scripts', 'devdsame_enqueue_assets');
 function devdsame_inline_css()
 {
     return <<<'CSS'
+        /* Library tiles in ONE row (owner 4 Nov 2026), Malware Scanner .mw-stats-adv 1:1: as many equal columns as tiles (4 or 5), two per row on phones. */
+        .dd-app .mc-stats-row { grid-template-columns:repeat(auto-fit,minmax(0,1fr)); gap:12px; }
+        /* DESIGN.md 32: hero number tiles, ONE size in every plugin (Backup & Migration 1.0.1 = the reference, owner 5 Nov 2026). */
+        .dd-app .dd-stats { gap:16px; } .dd-app .dd-stats .dd-stat { padding:14px 12px; } .dd-app .dd-stats .dd-stat-num { font-size:24px; line-height:24px; font-weight:700; }
+        .dd-app .dd-stats .dd-stat-lbl { font-size:12px; line-height:16px; margin-top:6px; color:#374151; } .dd-app .dd-stats .dd-stat-sub { font-size:11px; line-height:1.5; margin-top:2px; color:#374151; }
+        @media (max-width:782px) { .dd-app .mc-stats-row { grid-template-columns:repeat(2,minmax(0,1fr)); } }
         .dd-app .mc-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:14px; }
         .dd-app .mc-card { background:#fff; border:1px solid #e5e7eb; border-radius:12px; overflow:hidden; display:flex; flex-direction:column; position:relative; }
         .dd-app .mc-card.is-selected { border-color:#4f46e5; box-shadow:0 0 0 2px rgba(79,70,229,.25); }
@@ -215,7 +221,7 @@ function devdsame_inline_css()
         .dd-app .mc-bk-split.is-open .mc-bk-split-menu { display:block; }
         .dd-app .mc-bk-split-menu button { display:block; width:100%; text-align:left; background:none; border:0; padding:8px 10px; border-radius:6px; font-size:13px; color:#374151; cursor:pointer; white-space:nowrap; }
         .dd-app .mc-bk-split-menu button:hover { background:#eef2ff; color:#3730a3; }
-        .dd-app .dd-stat-sub { font-size:11px; color:#9ca3af; margin-top:2px; }
+        .dd-app .dd-stat-sub { font-size:11px; color:#374151; margin-top:2px; }
         .dd-app .mc-progress { height:8px; background:#e5e7eb; border-radius:999px; overflow:hidden; }
         .dd-app .mc-progress > span { display:block; height:100%; background:#4f46e5; width:0; transition:width .55s ease; }
         .dd-app .mc-progress-wrap.is-done .mc-progress > span { background:#10b981; }
@@ -614,7 +620,7 @@ function devdsame_render_dashboard_tab($s)
                 $lib_unused_b = isset($s['unused_bytes']) ? (int) $s['unused_bytes'] : (int) $s['library_cleanup_bytes']; // unused alone; duplicates have their own tile
                 $lib_used_b   = max(0, $lib_total_b - (int) $s['library_cleanup_bytes']);
                 ?>
-                <div class="dd-stats" style="margin-top:18px;">
+                <div class="dd-stats mc-stats-row" style="margin-top:18px;">
                     <div class="dd-stat"><div class="dd-stat-num"><?php echo (int) $s['total_files']; ?></div><div class="dd-stat-lbl"><?php esc_html_e('Total images', 'devdome-safe-media-cleaner'); ?></div><div class="dd-stat-sub"><?php echo esc_html($lib_total_b > 0 ? size_format($lib_total_b) : '0 B'); ?></div></div>
                     <div class="dd-stat"><div class="dd-stat-num" style="color:#10b981;"><?php echo (int) $s['used_count']; ?></div><div class="dd-stat-lbl"><?php esc_html_e('Used images', 'devdome-safe-media-cleaner'); ?></div><div class="dd-stat-sub"><?php echo esc_html($lib_used_b > 0 ? size_format($lib_used_b) : '0 B'); ?></div></div>
                     <div class="dd-stat"><div class="dd-stat-num" style="color:#f59e0b;"><?php echo (int) $s['unused_count']; ?></div><div class="dd-stat-lbl"><?php esc_html_e('Unused images', 'devdome-safe-media-cleaner'); ?></div><div class="dd-stat-sub"><?php echo esc_html($lib_unused_b > 0 ? size_format($lib_unused_b) : '0 B'); ?></div></div>

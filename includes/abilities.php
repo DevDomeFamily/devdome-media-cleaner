@@ -359,7 +359,7 @@ function devdsame_register_abilities()
 
     $reg('devdome-safe-media-cleaner/update-settings', __('Update Safe Media Cleaner settings', 'devdome-safe-media-cleaner'),
         __('Change any settings of Safe Media Cleaner on this WordPress site; pass only the keys to change: recent upload protection days (1 to 999) and on/off, WooCommerce and theme asset protection, the confidence threshold (0 to 100) for auto-selection, scheduled scans every N days (0 = off), automatic permanent delete of Recycle Bin batches after 0, 7, 14 or 30 days, CDN base URLs, folders never scanned, email notifications (only while connected to a DevDome account) and their frequency (1, 3, 7, 14 or 30 days), and the unused-growth alert in MB (0 = off). Values are validated exactly like the Settings form and the saved settings are read back and returned. Same as Save Settings in wp-admin.', 'devdome-safe-media-cleaner'),
-        devdsame_ability_settings_schema(true), devdsame_ability_settings_schema(false), 'devdsame_ability_update_settings', 'modify');
+        devdsame_ability_settings_schema(true), devdsame_ability_settings_schema(false), 'devdsame_ability_update_settings', 'destroy'); // 19 Oct: automatic permanent delete
 
     $reg('devdome-safe-media-cleaner/create-backup', __('Create a media backup', 'devdome-safe-media-cleaner'),
         __('Create a zip backup on this WordPress site in the background: scope library = Media Library images (what unused = only the images the latest scan classified as unused, what all = every image), scope disk = orphan files on disk (what unused = only the orphans, what all = every image file in the uploads folder). The zip is kept in the uploads folder and listed by list-backups. Needs the PHP zip extension. Runs in the background; poll get-job-progress. Refused while another job is running. Same as the Create Backup buttons in wp-admin.', 'devdome-safe-media-cleaner'),
@@ -372,7 +372,7 @@ function devdsame_register_abilities()
     $reg('devdome-safe-media-cleaner/restore-backup', __('Restore a media backup', 'devdome-safe-media-cleaner'),
         __('Restore one backup zip on this WordPress site in the background: files missing from the uploads folder are written back, files that exist now are kept untouched (a restore never overwrites current media), and restored Media Library images are re-registered. Runs in the background; poll get-job-progress, whose final message says how many files were written and how many were kept. Refused while another job is running. Same as the Restore button on the Backup tab in wp-admin.', 'devdome-safe-media-cleaner'),
         array('type' => 'object', 'properties' => array('backup_id' => $backup_id), 'required' => array('backup_id'), 'additionalProperties' => false),
-        $progress, 'devdsame_ability_restore_backup', 'modify');
+        $progress, 'devdsame_ability_restore_backup', 'destroy'); // 30 Oct 2026: overwrites the live media files with the backup copy, no undo = destructive
 
     $reg('devdome-safe-media-cleaner/delete-backup', __('Delete a media backup', 'devdome-safe-media-cleaner'),
         __('Delete one backup zip on this WordPress site and its record. This cannot be undone; pass confirm: true only after the user agreed. Same as the Delete button on the Backup tab in wp-admin.', 'devdome-safe-media-cleaner'),

@@ -501,8 +501,12 @@ function devdsame_tick_backup_restore($job, $chunk)
         // cannot exhaust memory via getFromIndex().
         $ext = strtolower((string) pathinfo($name, PATHINFO_EXTENSION));
         $stat = $zip->statIndex($i);
+        // Security review 2026-10-19 (#14): a name like x.php.jpg is refused (legacy multi-extension handlers would
+        // run it), and the bytes are checked below before anything is written.
+        $risky_inner = (bool) preg_match('/\.(php\d?|phtml|phar|pht|phps|cgi|pl|py|sh|htaccess|js|html?|svg)\.[a-z0-9]+$/i', wp_basename($name));
         if (
             !in_array($ext, $allowed, true)
+            || $risky_inner
             || 0 === strpos(wp_basename($name), '.')
             || !$stat
             || (int) $stat['size'] > (int) apply_filters('devdsame_max_backup_entry_bytes', 256 * MB_IN_BYTES)
@@ -532,6 +536,13 @@ function devdsame_tick_backup_restore($job, $chunk)
         $data = $zip->getFromIndex($i);
         if ($data === false) {
             $job['errors']++;
+            continue;
+        }
+        // #14: the content must be what the extension says. Raster images are checked with getimagesize on the
+        // bytes; an SVG must start as XML/SVG and carry no script; anything else is skipped and counted.
+        if (!devdsame_restore_bytes_ok($data, $ext)) {
+            $job['errors']++;
+            unset($data);
             continue;
         }
         $written = @file_put_contents($target, $data, LOCK_EX); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- streaming restore of media files into uploads; WP_Filesystem direct method wraps the same call.
@@ -915,4 +926,42 @@ function devdsame_handle_backup_upload_file()
         return 'error';
     }
     return 'uploaded';
+}
+
+/** Security review 2026-10-19 (#14): do the restored bytes really hold an image of the named kind? */
+function devdsame_restore_bytes_ok($data, $ext)
+{
+    $data = (string) $data;
+    if ('' === $data) {
+        return false;
+    }
+    if ('svg' === $ext) {
+        $head = ltrim(substr($data, 0, 512));
+        if (0 !== strpos($head, '<?xml') && 0 !== stripos($head, '<svg')) {
+            return false;
+        }
+        return !preg_match('/<script|javascript:|on[a-z]+\s*=/i', $data);
+    }
+    if (!function_exists('getimagesizefromstring')) {
+        return false;
+    }
+    $info = @getimagesizefromstring($data);
+    if (!is_array($info) || empty($info['mime'])) {
+        return false;
+    }
+    $mime = strtolower((string) $info['mime']);
+    $expect = array(
+        'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'jpe' => 'image/jpeg', 'png' => 'image/png', 'gif' => 'image/gif',
+        'webp' => 'image/webp', 'avif' => 'image/avif', 'bmp' => 'image/bmp', 'ico' => 'image/x-icon', 'tif' => 'image/tiff', 'tiff' => 'image/tiff', 'heic' => 'image/heic',
+    );
+    if (!isset($expect[$ext])) {
+        return false;
+    }
+    if ('ico' === $ext) {
+        return in_array($mime, array('image/x-icon', 'image/vnd.microsoft.icon'), true);
+    }
+    if ('bmp' === $ext) {
+        return in_array($mime, array('image/bmp', 'image/x-ms-bmp'), true);
+    }
+    return $mime === $expect[$ext];
 }
